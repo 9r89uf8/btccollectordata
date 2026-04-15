@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# BTC Collector Data
 
-## Getting Started
+Polymarket BTC 5-minute market tracker backed by Convex.
 
-First, run the development server:
+## Architecture
+
+- The web app reads market, snapshot, summary, and health data from Convex.
+- The long-running collector connects to:
+  - Polymarket RTDS for Chainlink BTC ticks
+  - Polymarket CLOB HTTP endpoints for market polling snapshots
+  - Polymarket market WebSocket for shadow capture and parity checks
+- The collector writes batches into Convex through the ingest route.
+
+In practice:
+
+- Browser or Vercel-hosted UI -> Convex
+- DigitalOcean Droplet collector -> Convex
+- Collector -> Polymarket APIs and WebSockets
+
+The UI and the Droplet should point at the same Convex deployment.
+
+## Local Development
+
+Install dependencies:
+
+```bash
+npm ci
+```
+
+Run Convex locally against your cloud deployment:
+
+```bash
+npx convex dev
+```
+
+Run the collector:
+
+```bash
+npm run collector:dev
+```
+
+Run the web app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Important Env Vars
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Web app / local repo:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `NEXT_PUBLIC_CONVEX_URL`
 
-## Learn More
+Collector:
 
-To learn more about Next.js, take a look at the following resources:
+- `CONVEX_URL`
+- `CONVEX_SITE_URL`
+- `INGEST_SHARED_SECRET`
+- `SNAPSHOT_POLL_MS`
+- `PERSIST_MARKET_RAW_EVENTS`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+See [collector/.env.example](/C:/Users/alexa/WebstormProjects/btcgt/collector/.env.example) for the collector env template.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Production Split
 
-## Deploy on Vercel
+Recommended setup:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Host the web UI on Vercel
+- Run the collector on a DigitalOcean Droplet
+- Use one shared Convex production deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+DigitalOcean collector deployment steps are in [DEPLOY_DIGITALOCEAN.md](/C:/Users/alexa/WebstormProjects/btcgt/DEPLOY_DIGITALOCEAN.md).
+Vercel web deployment steps are in [DEPLOY_VERCEL.md](/C:/Users/alexa/WebstormProjects/btcgt/DEPLOY_VERCEL.md).

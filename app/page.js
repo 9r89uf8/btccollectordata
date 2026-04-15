@@ -3,9 +3,10 @@ import Link from "next/link";
 import ProjectStatusPanel from "@/components/ProjectStatusPanel";
 import MarketsDashboard from "@/components/MarketsDashboard";
 import SiteHeader from "@/components/SiteHeader";
+import { getPublicConvexUrl } from "@/lib/convexUrl";
 
 export default function Home() {
-  const convexConfigured = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
+  const convexConfigured = Boolean(getPublicConvexUrl());
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-6 py-10 sm:px-10 lg:py-14">

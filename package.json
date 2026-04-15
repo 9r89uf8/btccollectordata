@@ -2,6 +2,9 @@
   "name": "btcgt",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=21"
+  },
   "scripts": {
     "dev": "next dev",
     "convex:dev": "convex dev",

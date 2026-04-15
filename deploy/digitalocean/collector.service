@@ -1,0 +1,20 @@
+[Unit]
+Description=BTCGT Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=btcgt
+Group=btcgt
+WorkingDirectory=/opt/btccollectordata
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/btcgt/collector.env
+ExecStart=/usr/bin/node collector/src/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

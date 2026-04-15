@@ -1,8 +1,9 @@
 "use client";
 
 import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { getPublicConvexUrl } from "@/lib/convexUrl";
 
-const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convexUrl = getPublicConvexUrl();
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 export function ConvexClientProvider({ children }) {
