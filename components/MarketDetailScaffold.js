@@ -485,12 +485,19 @@ export default function MarketDetailScaffold({ slug }) {
       <ReplayLineChart
         eyebrow="Replay"
         title="Displayed probability over time"
-        description={`Lines break when an expected replay sample bucket is missing. The strip below shows whether each loaded ${formatSamplingCadence(
+        description={`Lines break when an expected replay sample bucket is missing. ${market.outcomeLabels.upLabel} and ${market.outcomeLabels.downLabel} use the left probability axis, while Chainlink BTC overlays on the right USD axis. The strip below shows whether each loaded ${formatSamplingCadence(
           cadenceMs,
         )} bucket was good, stale, gap-filled, or missing.`}
         emptyMessage="No snapshot history has been written for this market yet."
         formatAxisValue={(tick) => formatProbability(tick)}
+        formatSecondaryAxisValue={(tick) =>
+          new Intl.NumberFormat("en-US", {
+            maximumFractionDigits: 0,
+          }).format(tick)
+        }
         sampleCadenceMs={cadenceMs}
+        secondaryYDomain={btcDomain}
+        secondaryYTicks={btcTicks}
         series={[
           {
             color: "#0f766e",
@@ -501,6 +508,13 @@ export default function MarketDetailScaffold({ slug }) {
             color: "#be185d",
             key: "downDisplayed",
             label: market.outcomeLabels.downLabel,
+          },
+          {
+            axis: "secondary",
+            color: "#1d4ed8",
+            dashArray: "8 6",
+            key: "btcChainlink",
+            label: "Chainlink BTC",
           },
         ]}
         timeline={timeline}

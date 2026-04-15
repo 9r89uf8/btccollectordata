@@ -123,12 +123,19 @@ function buildLinePath(timeline, series, getX, getY) {
   return path.trim();
 }
 
+function getSeriesAxis(series, hasSecondaryAxis) {
+  return hasSecondaryAxis && series.axis === "secondary" ? "secondary" : "primary";
+}
+
 export default function ReplayLineChart({
   description,
   emptyMessage,
   eyebrow,
   formatAxisValue,
+  formatSecondaryAxisValue = null,
   sampleCadenceMs = 1000,
+  secondaryYDomain = null,
+  secondaryYTicks = [],
   series,
   timeline,
   title,
@@ -152,13 +159,17 @@ export default function ReplayLineChart({
   const width = 920;
   const height = 320;
   const left = 58;
-  const right = 18;
+  const right = formatSecondaryAxisValue && secondaryYDomain ? 58 : 18;
   const top = 18;
   const bottom = 70;
   const qualityHeight = 14;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom - qualityHeight;
   const [domainMin, domainMax] = normalizeDomain(yDomain);
+  const hasSecondaryAxis = Boolean(formatSecondaryAxisValue && secondaryYDomain);
+  const [secondaryDomainMin, secondaryDomainMax] = hasSecondaryAxis
+    ? normalizeDomain(secondaryYDomain)
+    : [0, 1];
   const [bucketMin, bucketMax] = getBucketDomain(timeline, sampleCadenceMs);
   const tickIndices = buildTickIndices(timeline.length);
   const getX = (bucket) =>
@@ -166,6 +177,11 @@ export default function ReplayLineChart({
     ((bucket - bucketMin) / Math.max(bucketMax - bucketMin, sampleCadenceMs || 1)) * plotWidth;
   const getY = (value) =>
     top + ((domainMax - value) / Math.max(domainMax - domainMin, 0.000001)) * plotHeight;
+  const getSecondaryY = (value) =>
+    top +
+    ((secondaryDomainMax - value) /
+      Math.max(secondaryDomainMax - secondaryDomainMin, 0.000001)) *
+      plotHeight;
   const phaseBands = buildPhaseBands(timeline, sampleCadenceMs, getX, plotHeight, top);
   const qualityBarY = top + plotHeight + 14;
 
@@ -235,8 +251,26 @@ export default function ReplayLineChart({
             </g>
           ))}
 
+          {hasSecondaryAxis
+            ? secondaryYTicks.map((tick) => (
+                <g key={`secondary-${tick}`}>
+                  <text
+                    x={width - right + 12}
+                    y={getSecondaryY(tick) + 4}
+                    fill="#57534e"
+                    fontSize="11"
+                    textAnchor="start"
+                  >
+                    {formatSecondaryAxisValue(tick)}
+                  </text>
+                </g>
+              ))
+            : null}
+
           {series.map((item) => {
-            const path = buildLinePath(timeline, item, getX, getY);
+            const yAccessor =
+              getSeriesAxis(item, hasSecondaryAxis) === "secondary" ? getSecondaryY : getY;
+            const path = buildLinePath(timeline, item, getX, yAccessor);
 
             if (!path) {
               return null;
@@ -250,6 +284,7 @@ export default function ReplayLineChart({
                 stroke={item.color}
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                strokeDasharray={item.dashArray ?? undefined}
                 strokeWidth="2.75"
               />
             );
@@ -262,7 +297,11 @@ export default function ReplayLineChart({
                 <circle
                   key={`${item.key}-${entry._id}`}
                   cx={getX(entry.secondBucket)}
-                  cy={getY(entry[item.key])}
+                  cy={
+                    getSeriesAxis(item, hasSecondaryAxis) === "secondary"
+                      ? getSecondaryY(entry[item.key])
+                      : getY(entry[item.key])
+                  }
                   fill={item.color}
                   r="3.25"
                   stroke="white"
