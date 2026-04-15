@@ -5,6 +5,11 @@ const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
   timeZone: "America/New_York",
 });
+const ET_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "America/New_York",
+});
 const USD_FORMATTER = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -25,6 +30,14 @@ export function formatEtRange(startTs, endTs) {
   }
 
   return `${formatEtDateTime(startTs)} to ${formatEtDateTime(endTs)}`;
+}
+
+export function formatEtTime(ts) {
+  if (ts == null) {
+    return "pending";
+  }
+
+  return `${ET_TIME_FORMATTER.format(new Date(ts))} ET`;
 }
 
 export function formatProbability(value) {

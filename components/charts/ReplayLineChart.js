@@ -1,4 +1,5 @@
 import {
+  formatEtTime,
   formatRelativeSecond,
   formatSnapshotQualityLabel,
   getSnapshotQualityTone,
@@ -149,11 +150,11 @@ export default function ReplayLineChart({
   }
 
   const width = 920;
-  const height = 300;
+  const height = 320;
   const left = 58;
   const right = 18;
   const top = 18;
-  const bottom = 50;
+  const bottom = 70;
   const qualityHeight = 14;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom - qualityHeight;
@@ -281,12 +282,22 @@ export default function ReplayLineChart({
               />
               <text
                 x={getX(timeline[index]?.secondBucket ?? bucketMin)}
-                y={qualityBarY + qualityHeight + 26}
+                y={qualityBarY + qualityHeight + 24}
                 fill="#57534e"
                 fontSize="11"
                 textAnchor="middle"
               >
-                {formatRelativeSecond(timeline[index]?.secondsFromWindowStart)}
+                <tspan x={getX(timeline[index]?.secondBucket ?? bucketMin)} dy="0">
+                  {formatRelativeSecond(timeline[index]?.secondsFromWindowStart)}
+                </tspan>
+                <tspan
+                  x={getX(timeline[index]?.secondBucket ?? bucketMin)}
+                  dy="12"
+                  fill="#78716c"
+                  fontSize="10"
+                >
+                  {formatEtTime(timeline[index]?.ts)}
+                </tspan>
               </text>
             </g>
           ))}
