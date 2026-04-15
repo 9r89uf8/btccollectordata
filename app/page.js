@@ -1,65 +1,149 @@
-import Image from "next/image";
+import Link from "next/link";
+
+import ProjectStatusPanel from "@/components/ProjectStatusPanel";
+import MarketsDashboard from "@/components/MarketsDashboard";
+import SiteHeader from "@/components/SiteHeader";
 
 export default function Home() {
+  const convexConfigured = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-6 py-10 sm:px-10 lg:py-14">
+      <SiteHeader current="/" />
+
+      <section className="grid gap-6 rounded-[2rem] border border-black/10 bg-[linear-gradient(140deg,rgba(255,248,239,0.96),rgba(240,246,255,0.94))] p-8 shadow-[0_22px_70px_rgba(24,24,24,0.08)] lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="space-y-6">
+          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-stone-600">
+            <span className="rounded-full bg-black px-3 py-1 text-white">
+              Dashboard
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Gamma discovery
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Convex catalog
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              CLOB polling
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Replay detail
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Summary finalizer
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Analytics
+            </span>
+            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+              Market WS shadow
+            </span>
+          </div>
+          <div className="space-y-4">
+            <p className="text-sm font-medium uppercase tracking-[0.28em] text-amber-700">
+              Polymarket BTC Up/Down 5m
+            </p>
+            <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
+              Discovery, replay, analytics, and WS shadow capture are now live.
+            </h1>
+            <p className="max-w-2xl text-base leading-7 text-stone-700 sm:text-lg">
+              Active BTC 5-minute markets are pulled from Gamma into Convex and
+              surfaced here. Chainlink BTC ticks and one-second CLOB polling
+              snapshots now flow through the collector into Convex, and the
+              market WebSocket now runs beside polling in shadow mode to store
+              raw events and measure parity. Each market route renders replay
+              charts plus the gap-aware timeline, and the analytics route turns
+              stored summaries into threshold, calibration, and crossing-time
+              views.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-[1.2rem] border border-black/10 bg-white/75 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Step 10
+              </p>
+              <p className="mt-2 text-sm leading-6 text-stone-700">
+                Market WebSocket shadow capture with parity tracking
+              </p>
+            </div>
+            <div className="rounded-[1.2rem] border border-black/10 bg-white/75 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Current sources
+              </p>
+              <p className="mt-2 text-sm leading-6 text-stone-700">
+                Gamma discovery, Chainlink RTDS BTC, CLOB polls, and market WS shadow
+              </p>
+            </div>
+            <div className="rounded-[1.2rem] border border-black/10 bg-white/75 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Next layer
+              </p>
+              <p className="mt-2 text-sm leading-6 text-stone-700">
+                Hardening, repair, and restart-safe backfill
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/analytics"
+              className="inline-flex rounded-full bg-stone-950 px-5 py-3 text-sm font-medium text-stone-50 transition-colors hover:bg-stone-800"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              Open analytics
+            </Link>
+          </div>
+        </div>
+
+        {convexConfigured ? (
+          <ProjectStatusPanel />
+        ) : (
+          <section className="rounded-[1.5rem] border border-amber-300/70 bg-amber-50/90 p-6 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">
+              Convex setup needed
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
+              The app is wired for Convex, but the deployment URL is not set yet.
+            </h2>
+            <p className="mt-4 text-sm leading-7 text-stone-700">
+              Run `npm run convex:dev`, complete the login/project prompt, and
+              let Convex write `.env.local`. Once `NEXT_PUBLIC_CONVEX_URL`
+              exists, this panel switches to the live bootstrap query.
+            </p>
+            <div className="mt-6 space-y-3 rounded-[1.25rem] bg-white/80 p-4 text-sm text-stone-700">
+              <p className="font-semibold text-stone-900">Next actions</p>
+              <p>`npm run convex:dev`</p>
+              <p>`npm run dev`</p>
+              <p>`npm run collector:dev`</p>
+            </div>
+          </section>
+        )}
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <article className="rounded-[1.6rem] border border-black/10 bg-white/85 p-6 shadow-[0_12px_40px_rgba(30,30,30,0.06)]">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-700">
+            Framework guardrails
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          <ul className="mt-4 space-y-3 text-sm leading-7 text-stone-700">
+            <li>Keep `layout.js` and `page.js` server-first by default.</li>
+            <li>Limit Convex hooks to narrow client components.</li>
+            <li>Stay in the root app until the codebase forces a split.</li>
+          </ul>
+        </article>
+
+        <article className="rounded-[1.6rem] border border-black/10 bg-white/85 p-6 shadow-[0_12px_40px_rgba(30,30,30,0.06)]">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-700">
+            Step 10 live
+          </p>
+          <ul className="mt-4 space-y-3 text-sm leading-7 text-stone-700">
+            <li>Collector batches now post BTC ticks and market snapshots through the private Convex ingest route.</li>
+            <li>Chainlink `btc/usd` RTDS ticks and CLOB polling snapshots now write into Convex together.</li>
+            <li>Market WebSocket shadow capture now stores raw events in `market_events_raw` and keeps in-memory orderbook state for parity checks.</li>
+            <li>Polling remains the persisted snapshot source while capture-mode rollout is gated by parity metrics and reconnect health.</li>
+          </ul>
+        </article>
+      </section>
+
+      <MarketsDashboard />
+    </main>
   );
 }

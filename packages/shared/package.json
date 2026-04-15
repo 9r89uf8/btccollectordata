@@ -1,0 +1,5 @@
+{
+  "name": "@btcgt/shared",
+  "private": true,
+  "type": "module"
+}

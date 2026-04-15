@@ -1,0 +1,11 @@
+{
+  "name": "@btcgt/collector",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=21"
+  },
+  "scripts": {
+    "dev": "node src/index.js"
+  }
+}
