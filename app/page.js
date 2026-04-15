@@ -87,6 +87,12 @@ export default function Home() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
+              href="/markets"
+              className="inline-flex rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-stone-900 transition-colors hover:border-stone-300 hover:bg-stone-50"
+            >
+              Browse saved markets
+            </Link>
+            <Link
               href="/analytics"
               className="inline-flex rounded-full bg-stone-950 px-5 py-3 text-sm font-medium text-stone-50 transition-colors hover:bg-stone-800"
             >

@@ -1,12 +1,14 @@
+import { paginationOptsValidator } from "convex/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
-
-function sortByWindowDesc(markets) {
-  return [...markets].sort((a, b) => b.windowStartTs - a.windowStartTs);
-}
+const archiveStatusValue = v.union(
+  v.literal("past"),
+  v.literal("resolved"),
+  v.literal("all"),
+);
 
 function getActiveSortPriority(market, nowTs) {
   if (market.windowStartTs <= nowTs && nowTs < market.windowEndTs) {
@@ -61,9 +63,44 @@ export const listRecentBtc5m = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const limit = Math.max(1, Math.min(args.limit ?? 12, 50));
-    const markets = await ctx.db.query("markets").collect();
 
-    return sortByWindowDesc(markets).slice(0, limit);
+    return await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .take(limit);
+  },
+});
+
+export const listArchiveBtc5m = query({
+  args: {
+    status: v.optional(archiveStatusValue),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const status = args.status ?? "past";
+
+    if (status === "past") {
+      return await ctx.db
+        .query("markets")
+        .withIndex("by_active_windowStartTs", (q) => q.eq("active", false))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (status === "resolved") {
+      return await ctx.db
+        .query("markets")
+        .withIndex("by_resolved_windowEndTs", (q) => q.eq("resolved", true))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
