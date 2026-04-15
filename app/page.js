@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import ConvexSetupNotice from "@/components/ConvexSetupNotice";
 import ProjectStatusPanel from "@/components/ProjectStatusPanel";
 import MarketsDashboard from "@/components/MarketsDashboard";
 import SiteHeader from "@/components/SiteHeader";
@@ -97,25 +98,10 @@ export default function Home() {
         {convexConfigured ? (
           <ProjectStatusPanel />
         ) : (
-          <section className="rounded-[1.5rem] border border-amber-300/70 bg-amber-50/90 p-6 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">
-              Convex setup needed
-            </p>
-            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
-              The app is wired for Convex, but the deployment URL is not set yet.
-            </h2>
-            <p className="mt-4 text-sm leading-7 text-stone-700">
-              Run `npm run convex:dev`, complete the login/project prompt, and
-              let Convex write `.env.local`. Once `NEXT_PUBLIC_CONVEX_URL`
-              exists, this panel switches to the live bootstrap query.
-            </p>
-            <div className="mt-6 space-y-3 rounded-[1.25rem] bg-white/80 p-4 text-sm text-stone-700">
-              <p className="font-semibold text-stone-900">Next actions</p>
-              <p>`npm run convex:dev`</p>
-              <p>`npm run dev`</p>
-              <p>`npm run collector:dev`</p>
-            </div>
-          </section>
+          <ConvexSetupNotice
+            title="The app is wired for Convex, but this deployment does not have a valid public Convex URL."
+            message="Set NEXT_PUBLIC_CONVEX_URL in Vercel to the full https://...convex.cloud URL for the deployment that your collector writes to."
+          />
         )}
       </section>
 
@@ -144,7 +130,14 @@ export default function Home() {
         </article>
       </section>
 
-      <MarketsDashboard />
+      {convexConfigured ? (
+        <MarketsDashboard />
+      ) : (
+        <ConvexSetupNotice
+          title="Catalog dashboard unavailable until Convex is configured."
+          message="The homepage hides all Convex-backed query components when NEXT_PUBLIC_CONVEX_URL is missing or invalid so Vercel can prerender safely."
+        />
+      )}
     </main>
   );
 }
