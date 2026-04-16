@@ -239,6 +239,46 @@ function QualityPill({ quality }) {
   );
 }
 
+const EMPTY_BOUNDARY_MOVE_OVERVIEW = {
+  averageAbsMoveUsd: null,
+  averageSignedMoveUsd: null,
+  excludedCount: 0,
+  maxAbsMoveUsd: null,
+  medianAbsMoveUsd: null,
+  p75AbsMoveUsd: null,
+  p90AbsMoveUsd: null,
+  usableCount: 0,
+};
+
+const EMPTY_OVERVIEW = {
+  downWins: 0,
+  gapCount: 0,
+  goodCount: 0,
+  partialCount: 0,
+  sampleCount: 0,
+  unknownCount: 0,
+  upWins: 0,
+  windowStartMax: null,
+  windowStartMin: null,
+};
+
+const EMPTY_APPLIED_FILTERS = {
+  dateRange: "7d",
+  minSampleSize: 1,
+  quality: "all",
+};
+
+const EMPTY_HEADLINE_FINDING = {
+  averageDisplayed: null,
+  checkpoint: "t60",
+  checkpointLabel: "T+60",
+  sampleCount: 0,
+  side: "up",
+  threshold: 0.7,
+  winCount: 0,
+  winRate: null,
+};
+
 export default function AnalyticsDashboard() {
   const [filters, setFilters] = useState({
     dateRange: "7d",
@@ -262,16 +302,16 @@ export default function AnalyticsDashboard() {
   }
 
   const {
-    boundaryMoveBuckets,
-    boundaryMoveHeadline,
-    boundaryMoveOverview,
-    boundaryMoveThresholdStats,
-    appliedFilters,
-    calibrationRows,
-    crossingDistributions,
-    headlineFinding,
-    overview,
-    thresholdStats,
+    boundaryMoveBuckets = [],
+    boundaryMoveHeadline = null,
+    boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
+    boundaryMoveThresholdStats = [],
+    appliedFilters = EMPTY_APPLIED_FILTERS,
+    calibrationRows = [],
+    crossingDistributions = [],
+    headlineFinding = EMPTY_HEADLINE_FINDING,
+    overview = EMPTY_OVERVIEW,
+    thresholdStats = [],
   } = analytics;
 
   return (
