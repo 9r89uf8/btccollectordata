@@ -250,6 +250,8 @@ const EMPTY_BOUNDARY_MOVE_OVERVIEW = {
   usableCount: 0,
 };
 
+const EMPTY_BOUNDARY_MOVE_ROWS = [];
+
 const EMPTY_OVERVIEW = {
   downWins: 0,
   gapCount: 0,
@@ -303,6 +305,8 @@ export default function AnalyticsDashboard() {
 
   const {
     boundaryMoveBuckets = [],
+    boundaryMoveByHour = EMPTY_BOUNDARY_MOVE_ROWS,
+    boundaryMoveBySession = EMPTY_BOUNDARY_MOVE_ROWS,
     boundaryMoveHeadline = null,
     boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
     boundaryMoveThresholdStats = [],
@@ -505,6 +509,122 @@ export default function AnalyticsDashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="Time-of-day split"
+        title="When 5-minute BTC markets tend to move more or less"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          These buckets are grouped by each market window's start time in
+          Eastern Time. Hours or sessions with fewer than{" "}
+          {formatCount(appliedFilters.minSampleSize)} usable market
+          {appliedFilters.minSampleSize === 1 ? "" : "s"} are hidden.
+        </p>
+        {boundaryMoveOverview.usableCount === 0 ? (
+          <EmptyTable message="No usable BTC boundary moves are available for ET hour/session analysis yet." />
+        ) : boundaryMoveByHour.length === 0 && boundaryMoveBySession.length === 0 ? (
+          <EmptyTable message="No ET hour or session buckets currently meet the support floor." />
+        ) : (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                ET sessions
+              </p>
+              {boundaryMoveBySession.length === 0 ? (
+                <EmptyTable message="No ET session buckets currently meet the support floor." />
+              ) : (
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Session</th>
+                        <th className="px-4 py-3 font-semibold">ET range</th>
+                        <th className="px-4 py-3 font-semibold">Markets</th>
+                        <th className="px-4 py-3 font-semibold">Median abs move</th>
+                        <th className="px-4 py-3 font-semibold">Avg abs move</th>
+                        <th className="px-4 py-3 font-semibold">Share &gt;= $20</th>
+                        <th className="px-4 py-3 font-semibold">Share &gt;= $50</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boundaryMoveBySession.map((row) => (
+                        <tr key={row.id} className="border-t border-stone-200/80 bg-white">
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {row.label}
+                          </td>
+                          <td className="px-4 py-3">{row.rangeLabel}</td>
+                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                          <td className="px-4 py-3">
+                            {formatBtcUsd(row.medianAbsMoveUsd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatBtcUsd(row.averageAbsMoveUsd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatProbability(row.shareAt20Usd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatProbability(row.shareAt50Usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                ET hour of day
+              </p>
+              {boundaryMoveByHour.length === 0 ? (
+                <EmptyTable message="No ET hour buckets currently meet the support floor." />
+              ) : (
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">ET hour</th>
+                        <th className="px-4 py-3 font-semibold">Markets</th>
+                        <th className="px-4 py-3 font-semibold">Median abs move</th>
+                        <th className="px-4 py-3 font-semibold">Avg abs move</th>
+                        <th className="px-4 py-3 font-semibold">Share &gt;= $20</th>
+                        <th className="px-4 py-3 font-semibold">Share &gt;= $50</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boundaryMoveByHour.map((row) => (
+                        <tr
+                          key={row.hour}
+                          className="border-t border-stone-200/80 bg-white"
+                        >
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {row.label}
+                          </td>
+                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                          <td className="px-4 py-3">
+                            {formatBtcUsd(row.medianAbsMoveUsd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatBtcUsd(row.averageAbsMoveUsd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatProbability(row.shareAt20Usd)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatProbability(row.shareAt50Usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </TableShell>

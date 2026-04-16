@@ -163,6 +163,37 @@ const BOUNDARY_MOVE_BUCKETS = [
   { minUsd: 75, maxUsd: 100, label: "$75-$99.99" },
   { minUsd: 100, maxUsd: null, label: "$100+" },
 ];
+const ET_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  hourCycle: "h23",
+  timeZone: "America/New_York",
+});
+const ET_SESSION_BUCKETS = [
+  {
+    endHour: 5,
+    id: "overnight",
+    label: "Overnight ET",
+    startHour: 0,
+  },
+  {
+    endHour: 11,
+    id: "morning",
+    label: "Morning ET",
+    startHour: 6,
+  },
+  {
+    endHour: 17,
+    id: "afternoon",
+    label: "Afternoon ET",
+    startHour: 12,
+  },
+  {
+    endHour: 23,
+    id: "evening",
+    label: "Evening ET",
+    startHour: 18,
+  },
+];
 
 function toFiniteNumber(value) {
   if (value == null || value === "") {
@@ -223,6 +254,31 @@ function getBoundaryMove(summary) {
     signedMoveUsd,
     startReference,
   };
+}
+
+function formatHourLabel(hour) {
+  const normalizedHour = ((hour % 24) + 24) % 24;
+  const suffix = normalizedHour >= 12 ? "PM" : "AM";
+  const displayHour = normalizedHour % 12 === 0 ? 12 : normalizedHour % 12;
+
+  return `${displayHour}:00 ${suffix}`;
+}
+
+function formatHourRangeLabel(startHour, endHour) {
+  return `${formatHourLabel(startHour)}-${formatHourLabel((endHour + 1) % 24)}`;
+}
+
+function getEtHour(ts) {
+  const hourText = ET_HOUR_FORMATTER.format(new Date(ts));
+  const parsedHour = Number(hourText);
+
+  return Number.isFinite(parsedHour) ? parsedHour : null;
+}
+
+function getEtSession(hour) {
+  return ET_SESSION_BUCKETS.find(
+    (bucket) => hour >= bucket.startHour && hour <= bucket.endHour,
+  ) ?? null;
 }
 
 function getCheckpointValue(summary, checkpoint) {
@@ -446,6 +502,72 @@ function buildBoundaryMoveBuckets(rows) {
       share: moveRows.length > 0 ? count / moveRows.length : null,
     };
   });
+}
+
+function buildBoundaryMoveAggregate(rows) {
+  const absMoves = rows
+    .map((row) => row.boundaryMove.absMoveUsd)
+    .sort((a, b) => a - b);
+
+  return {
+    averageAbsMoveUsd:
+      absMoves.length > 0
+        ? absMoves.reduce((sum, value) => sum + value, 0) / absMoves.length
+        : null,
+    maxAbsMoveUsd: absMoves.length > 0 ? absMoves[absMoves.length - 1] : null,
+    medianAbsMoveUsd: getPercentile(absMoves, 0.5),
+    p75AbsMoveUsd: getPercentile(absMoves, 0.75),
+    sampleCount: rows.length,
+    shareAt20Usd:
+      rows.length > 0
+        ? rows.filter((row) => row.boundaryMove.absMoveUsd >= 20).length / rows.length
+        : null,
+    shareAt50Usd:
+      rows.length > 0
+        ? rows.filter((row) => row.boundaryMove.absMoveUsd >= 50).length / rows.length
+        : null,
+  };
+}
+
+function buildBoundaryMoveByHour(rows, minSampleSize) {
+  const moveRows = getBoundaryMoveRows(rows)
+    .map((row) => ({
+      ...row,
+      etHour: getEtHour(row.summary.windowStartTs),
+    }))
+    .filter((row) => row.etHour != null);
+
+  return Array.from({ length: 24 }, (_, hour) => {
+    const hourRows = moveRows.filter((row) => row.etHour === hour);
+
+    return {
+      hour,
+      label: formatHourLabel(hour),
+      ...buildBoundaryMoveAggregate(hourRows),
+    };
+  }).filter((row) => row.sampleCount >= minSampleSize);
+}
+
+function buildBoundaryMoveBySession(rows, minSampleSize) {
+  const moveRows = getBoundaryMoveRows(rows)
+    .map((row) => ({
+      ...row,
+      etHour: getEtHour(row.summary.windowStartTs),
+    }))
+    .filter((row) => row.etHour != null);
+
+  return ET_SESSION_BUCKETS.map((bucket) => {
+    const bucketRows = moveRows.filter(
+      (row) => row.etHour >= bucket.startHour && row.etHour <= bucket.endHour,
+    );
+
+    return {
+      id: bucket.id,
+      label: bucket.label,
+      rangeLabel: formatHourRangeLabel(bucket.startHour, bucket.endHour),
+      ...buildBoundaryMoveAggregate(bucketRows),
+    };
+  }).filter((row) => row.sampleCount >= minSampleSize);
 }
 
 function buildThresholdStats(rows, minSampleSize) {
@@ -682,6 +804,8 @@ export function buildAnalyticsReport({
       quality: filters.quality,
     },
     boundaryMoveBuckets: buildBoundaryMoveBuckets(rows),
+    boundaryMoveByHour: buildBoundaryMoveByHour(rows, minSampleSize),
+    boundaryMoveBySession: buildBoundaryMoveBySession(rows, minSampleSize),
     boundaryMoveHeadline: buildBoundaryMoveHeadline(rows),
     boundaryMoveOverview: buildBoundaryMoveOverview(rows),
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),

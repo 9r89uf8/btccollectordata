@@ -292,6 +292,106 @@ test("buildAnalyticsReport computes BTC boundary move thresholds and buckets", (
   );
 });
 
+test("buildAnalyticsReport groups BTC boundary moves by ET hour and session", () => {
+  const markets = [
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m1" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m2" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m3" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m4" }),
+  ];
+  const summaries = [
+    buildSummary({
+      closeReferencePriceOfficial: 74_030,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m1",
+      windowStartTs: Date.UTC(2026, 3, 16, 5, 0, 0),
+    }),
+    buildSummary({
+      closeReferencePriceOfficial: 74_060,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m2",
+      windowStartTs: Date.UTC(2026, 3, 16, 5, 5, 0),
+    }),
+    buildSummary({
+      closeReferencePriceOfficial: 74_025,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m3",
+      windowStartTs: Date.UTC(2026, 3, 16, 13, 0, 0),
+    }),
+    buildSummary({
+      closeReferencePriceOfficial: 74_090,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m4",
+      windowStartTs: Date.UTC(2026, 3, 16, 23, 0, 0),
+    }),
+  ];
+
+  const result = buildAnalyticsReport({
+    filters: {
+      dateRange: "all",
+      minSampleSize: 1,
+      quality: "all",
+    },
+    markets,
+    nowTs: Date.UTC(2026, 3, 17, 0, 0, 0),
+    summaries,
+  });
+
+  const hourOne = result.boundaryMoveByHour.find((row) => row.hour === 1);
+  assert.deepEqual(
+    {
+      averageAbsMoveUsd: hourOne.averageAbsMoveUsd,
+      label: hourOne.label,
+      sampleCount: hourOne.sampleCount,
+      shareAt20Usd: hourOne.shareAt20Usd,
+      shareAt50Usd: hourOne.shareAt50Usd,
+    },
+    {
+      averageAbsMoveUsd: 45,
+      label: "1:00 AM",
+      sampleCount: 2,
+      shareAt20Usd: 1,
+      shareAt50Usd: 0.5,
+    },
+  );
+
+  const overnight = result.boundaryMoveBySession.find(
+    (row) => row.id === "overnight",
+  );
+  assert.deepEqual(
+    {
+      averageAbsMoveUsd: overnight.averageAbsMoveUsd,
+      label: overnight.label,
+      rangeLabel: overnight.rangeLabel,
+      sampleCount: overnight.sampleCount,
+      shareAt20Usd: overnight.shareAt20Usd,
+    },
+    {
+      averageAbsMoveUsd: 45,
+      label: "Overnight ET",
+      rangeLabel: "12:00 AM-6:00 AM",
+      sampleCount: 2,
+      shareAt20Usd: 1,
+    },
+  );
+
+  const morning = result.boundaryMoveBySession.find(
+    (row) => row.id === "morning",
+  );
+  assert.equal(morning.sampleCount, 1);
+  assert.equal(morning.medianAbsMoveUsd, 25);
+
+  const evening = result.boundaryMoveBySession.find(
+    (row) => row.id === "evening",
+  );
+  assert.equal(evening.sampleCount, 1);
+  assert.equal(evening.maxAbsMoveUsd, 90);
+});
+
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {
   const nowTs = 5_000_000;
   const markets = [
