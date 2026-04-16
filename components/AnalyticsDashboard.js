@@ -10,6 +10,7 @@ import {
   ANALYTICS_QUALITY_OPTIONS,
 } from "@/packages/shared/src/analytics.js";
 import {
+  formatBtcUsd,
   formatEtDateTime,
   formatProbability,
   getToneClasses,
@@ -37,6 +38,20 @@ function ControlField({ children, label }) {
       </span>
       {children}
     </label>
+  );
+}
+
+function MetricPanel({ detail, label, value }) {
+  return (
+    <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-stone-700">{detail}</p>
+    </div>
   );
 }
 
@@ -112,6 +127,26 @@ function formatCalibrationGap(value) {
 
   const sign = value > 0 ? "+" : "";
   return `${sign}${(value * 100).toFixed(1)} pts`;
+}
+
+function formatBoundaryMoveHeadline(headline) {
+  if (!headline || headline.sampleCount === 0) {
+    return "No finalized markets in the current filter set have both a start and end BTC reference yet.";
+  }
+
+  return `${formatProbability(headline.share)} of usable markets moved at least ${formatBtcUsd(
+    headline.thresholdUsd,
+  )} from price to beat to close over 5 minutes.`;
+}
+
+function formatSupportFloorMessage(usableCount, minSampleSize) {
+  if (usableCount >= minSampleSize) {
+    return "Share of usable markets whose absolute BTC move clears each USD threshold.";
+  }
+
+  return `At least ${formatCount(minSampleSize)} usable markets are required by the current support floor, but only ${formatCount(
+    usableCount,
+  )} currently have both boundary references.`;
 }
 
 function formatHeadlineFinding(headlineFinding) {
@@ -227,6 +262,10 @@ export default function AnalyticsDashboard() {
   }
 
   const {
+    boundaryMoveBuckets,
+    boundaryMoveHeadline,
+    boundaryMoveOverview,
+    boundaryMoveThresholdStats,
     appliedFilters,
     calibrationRows,
     crossingDistributions,
@@ -311,6 +350,124 @@ export default function AnalyticsDashboard() {
           body={formatDateSpan(overview.windowStartMin, overview.windowStartMax)}
         />
       </section>
+
+      <TableShell
+        caption="5-minute BTC move"
+        title="How far BTC moves from price to beat to close"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          This block uses stored market boundary references from `market_summaries`.
+          It prefers official prices when available and falls back to derived
+          Chainlink start/end references otherwise.
+        </p>
+
+        {boundaryMoveOverview.usableCount === 0 ? (
+          <EmptyTable message="No filtered markets currently have both a usable start and end BTC reference." />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
+            <MetricPanel
+              label="Headline"
+              value={formatProbability(boundaryMoveHeadline.share)}
+              detail={formatBoundaryMoveHeadline(boundaryMoveHeadline)}
+            />
+            <MetricPanel
+              label="Usable sample"
+              value={formatCount(boundaryMoveOverview.usableCount)}
+              detail={`${formatCount(boundaryMoveOverview.excludedCount)} filtered market${boundaryMoveOverview.excludedCount === 1 ? "" : "s"} excluded because one boundary reference is missing.`}
+            />
+            <MetricPanel
+              label="Median abs move"
+              value={formatBtcUsd(boundaryMoveOverview.medianAbsMoveUsd)}
+              detail="Median absolute BTC move over the 5-minute market window."
+            />
+            <MetricPanel
+              label="P90 abs move"
+              value={formatBtcUsd(boundaryMoveOverview.p90AbsMoveUsd)}
+              detail="90th-percentile absolute move across usable 5-minute markets."
+            />
+            <MetricPanel
+              label="Max abs move"
+              value={formatBtcUsd(boundaryMoveOverview.maxAbsMoveUsd)}
+              detail="Largest absolute 5-minute move in the current filtered sample."
+            />
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="Move thresholds"
+        title="Share of markets that move at least $20, $30, $40, and beyond"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          {formatSupportFloorMessage(
+            boundaryMoveOverview.usableCount,
+            appliedFilters.minSampleSize,
+          )}
+        </p>
+        {boundaryMoveThresholdStats.length === 0 ? (
+          <EmptyTable message="No BTC move threshold rows meet the current support floor." />
+        ) : (
+          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+            <table className="min-w-full text-left text-sm text-stone-700">
+              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Abs move threshold</th>
+                  <th className="px-4 py-3 font-semibold">Usable markets</th>
+                  <th className="px-4 py-3 font-semibold">Markets at or above</th>
+                  <th className="px-4 py-3 font-semibold">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {boundaryMoveThresholdStats.map((row) => (
+                  <tr
+                    key={row.thresholdUsd}
+                    className="border-t border-stone-200/80 bg-white"
+                  >
+                    <td className="px-4 py-3 font-medium text-stone-950">
+                      {formatBtcUsd(row.thresholdUsd)}
+                    </td>
+                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                    <td className="px-4 py-3">{formatCount(row.hitCount)}</td>
+                    <td className="px-4 py-3">{formatProbability(row.share)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="Move distribution"
+        title="Absolute move distribution by BTC dollar bucket"
+      >
+        {boundaryMoveOverview.usableCount === 0 ? (
+          <EmptyTable message="No usable BTC boundary moves are available for bucketed distribution yet." />
+        ) : (
+          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+            <table className="min-w-full text-left text-sm text-stone-700">
+              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Abs move bucket</th>
+                  <th className="px-4 py-3 font-semibold">Markets</th>
+                  <th className="px-4 py-3 font-semibold">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {boundaryMoveBuckets.map((row) => (
+                  <tr key={row.label} className="border-t border-stone-200/80 bg-white">
+                    <td className="px-4 py-3 font-medium text-stone-950">
+                      {row.label}
+                    </td>
+                    <td className="px-4 py-3">{formatCount(row.count)}</td>
+                    <td className="px-4 py-3">{formatProbability(row.share)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </TableShell>
 
       <TableShell
         caption="Threshold stats"

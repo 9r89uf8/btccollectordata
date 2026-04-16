@@ -12,6 +12,10 @@ function buildMarket({ quality = DATA_QUALITY.GOOD, slug }) {
 }
 
 function buildSummary({
+  btcChainlinkAtEnd = null,
+  btcChainlinkAtStart = null,
+  closeReferencePriceDerived = null,
+  closeReferencePriceOfficial = null,
   d15 = null,
   d30 = null,
   d60 = null,
@@ -21,6 +25,8 @@ function buildSummary({
   firstTimeAbove60 = null,
   firstTimeAbove70 = null,
   firstTimeAbove80 = null,
+  priceToBeatDerived = null,
+  priceToBeatOfficial = null,
   resolvedOutcome,
   slug,
   t15 = null,
@@ -32,7 +38,10 @@ function buildSummary({
   windowStartTs,
 }) {
   return {
-    closeReferencePriceOfficial: null,
+    btcChainlinkAtEnd,
+    btcChainlinkAtStart,
+    closeReferencePriceDerived,
+    closeReferencePriceOfficial,
     dataQuality: null,
     downDisplayedAtT0: null,
     downDisplayedAtT15: d15,
@@ -47,7 +56,8 @@ function buildSummary({
     firstTimeAbove80,
     marketId: `${slug}-id`,
     marketSlug: slug,
-    priceToBeatOfficial: null,
+    priceToBeatDerived,
+    priceToBeatOfficial,
     qualityFlags: [],
     resolvedOutcome,
     upDisplayedAtT0: null,
@@ -180,6 +190,106 @@ test("buildAnalyticsReport filters by quality and date range and computes thresh
     winCount: 0,
     winRate: null,
   });
+});
+
+test("buildAnalyticsReport computes BTC boundary move thresholds and buckets", () => {
+  const nowTs = 2_000_000;
+  const markets = [
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m1" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m2" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m3" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m4" }),
+  ];
+  const summaries = [
+    buildSummary({
+      closeReferencePriceOfficial: 74_025,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m1",
+      windowStartTs: nowTs - 1_000,
+    }),
+    buildSummary({
+      closeReferencePriceOfficial: 73_960,
+      priceToBeatOfficial: 74_000,
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m2",
+      windowStartTs: nowTs - 2_000,
+    }),
+    buildSummary({
+      closeReferencePriceDerived: 74_315,
+      priceToBeatDerived: 74_300,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m3",
+      windowStartTs: nowTs - 3_000,
+    }),
+    buildSummary({
+      closeReferencePriceOfficial: 74_120,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m4",
+      windowStartTs: nowTs - 4_000,
+    }),
+  ];
+
+  const result = buildAnalyticsReport({
+    filters: {
+      dateRange: "all",
+      minSampleSize: 1,
+      quality: "all",
+    },
+    markets,
+    nowTs,
+    summaries,
+  });
+
+  assert.deepEqual(result.boundaryMoveHeadline, {
+    hitCount: 2,
+    sampleCount: 3,
+    share: 2 / 3,
+    thresholdUsd: 20,
+  });
+  assert.deepEqual(result.boundaryMoveOverview, {
+    averageAbsMoveUsd: 80 / 3,
+    averageSignedMoveUsd: 0,
+    excludedCount: 1,
+    maxAbsMoveUsd: 40,
+    medianAbsMoveUsd: 25,
+    p75AbsMoveUsd: 40,
+    p90AbsMoveUsd: 40,
+    usableCount: 3,
+  });
+
+  const moveAt20 = result.boundaryMoveThresholdStats.find(
+    (row) => row.thresholdUsd === 20,
+  );
+  assert.deepEqual(moveAt20, {
+    hitCount: 2,
+    sampleCount: 3,
+    share: 2 / 3,
+    thresholdUsd: 20,
+  });
+
+  const moveAt40 = result.boundaryMoveThresholdStats.find(
+    (row) => row.thresholdUsd === 40,
+  );
+  assert.deepEqual(moveAt40, {
+    hitCount: 1,
+    sampleCount: 3,
+    share: 1 / 3,
+    thresholdUsd: 40,
+  });
+
+  assert.equal(
+    result.boundaryMoveBuckets.find((bucket) => bucket.label === "$10-$19.99").count,
+    1,
+  );
+  assert.equal(
+    result.boundaryMoveBuckets.find((bucket) => bucket.label === "$20-$29.99").count,
+    1,
+  );
+  assert.equal(
+    result.boundaryMoveBuckets.find((bucket) => bucket.label === "$40-$49.99").count,
+    1,
+  );
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {

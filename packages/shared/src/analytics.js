@@ -151,6 +151,18 @@ const HEADLINE_TARGET = {
   side: MARKET_OUTCOMES.UP,
   threshold: 0.7,
 };
+const BOUNDARY_MOVE_HEADLINE_THRESHOLD_USD = 20;
+const BOUNDARY_MOVE_THRESHOLD_VALUES = [10, 20, 30, 40, 50, 75, 100];
+const BOUNDARY_MOVE_BUCKETS = [
+  { minUsd: 0, maxUsd: 10, label: "$0-$9.99" },
+  { minUsd: 10, maxUsd: 20, label: "$10-$19.99" },
+  { minUsd: 20, maxUsd: 30, label: "$20-$29.99" },
+  { minUsd: 30, maxUsd: 40, label: "$30-$39.99" },
+  { minUsd: 40, maxUsd: 50, label: "$40-$49.99" },
+  { minUsd: 50, maxUsd: 75, label: "$50-$74.99" },
+  { minUsd: 75, maxUsd: 100, label: "$75-$99.99" },
+  { minUsd: 100, maxUsd: null, label: "$100+" },
+];
 
 function toFiniteNumber(value) {
   if (value == null || value === "") {
@@ -173,6 +185,44 @@ function getDateRangeStart(dateRange, nowTs) {
 
 function getSummaryQuality(summary, marketsBySlug) {
   return summary.dataQuality ?? marketsBySlug.get(summary.marketSlug)?.dataQuality ?? "unknown";
+}
+
+function getBoundaryReferencePrice(summary, fields) {
+  for (const field of fields) {
+    const value = toFiniteNumber(summary[field]);
+
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getBoundaryMove(summary) {
+  const startReference = getBoundaryReferencePrice(summary, [
+    "priceToBeatOfficial",
+    "priceToBeatDerived",
+    "btcChainlinkAtStart",
+  ]);
+  const endReference = getBoundaryReferencePrice(summary, [
+    "closeReferencePriceOfficial",
+    "closeReferencePriceDerived",
+    "btcChainlinkAtEnd",
+  ]);
+
+  if (startReference === null || endReference === null) {
+    return null;
+  }
+
+  const signedMoveUsd = endReference - startReference;
+
+  return {
+    absMoveUsd: Math.abs(signedMoveUsd),
+    endReference,
+    signedMoveUsd,
+    startReference,
+  };
 }
 
 function getCheckpointValue(summary, checkpoint) {
@@ -235,6 +285,7 @@ function buildFilteredRows({ summaries, markets, filters, nowTs }) {
   return sortRowsByWindow(
     summaries
       .map((summary) => ({
+        boundaryMove: getBoundaryMove(summary),
         quality: getSummaryQuality(summary, marketsBySlug),
         summary,
       }))
@@ -287,6 +338,114 @@ function buildOverview(rows) {
     windowStartMax: rows.length > 0 ? rows[rows.length - 1].summary.windowStartTs : null,
     windowStartMin: rows.length > 0 ? rows[0].summary.windowStartTs : null,
   };
+}
+
+function getPercentile(sortedValues, percentile) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
+    return null;
+  }
+
+  const safePercentile = Math.max(0, Math.min(percentile, 1));
+  const index = Math.max(
+    0,
+    Math.ceil(safePercentile * sortedValues.length) - 1,
+  );
+
+  return sortedValues[index] ?? null;
+}
+
+function getBoundaryMoveRows(rows) {
+  return rows.filter((row) => row.boundaryMove !== null);
+}
+
+function buildBoundaryMoveOverview(rows) {
+  const moveRows = getBoundaryMoveRows(rows);
+  const absMoves = moveRows
+    .map((row) => row.boundaryMove.absMoveUsd)
+    .sort((a, b) => a - b);
+  const signedMoves = moveRows.map((row) => row.boundaryMove.signedMoveUsd);
+  const averageAbsMoveUsd =
+    absMoves.length > 0
+      ? absMoves.reduce((sum, value) => sum + value, 0) / absMoves.length
+      : null;
+  const averageSignedMoveUsd =
+    signedMoves.length > 0
+      ? signedMoves.reduce((sum, value) => sum + value, 0) / signedMoves.length
+      : null;
+
+  return {
+    averageAbsMoveUsd,
+    averageSignedMoveUsd,
+    excludedCount: rows.length - moveRows.length,
+    maxAbsMoveUsd: absMoves.length > 0 ? absMoves[absMoves.length - 1] : null,
+    medianAbsMoveUsd: getPercentile(absMoves, 0.5),
+    p75AbsMoveUsd: getPercentile(absMoves, 0.75),
+    p90AbsMoveUsd: getPercentile(absMoves, 0.9),
+    usableCount: moveRows.length,
+  };
+}
+
+function buildBoundaryMoveHeadline(rows) {
+  const moveRows = getBoundaryMoveRows(rows);
+  const hitCount = moveRows.filter(
+    (row) => row.boundaryMove.absMoveUsd >= BOUNDARY_MOVE_HEADLINE_THRESHOLD_USD,
+  ).length;
+
+  return {
+    hitCount,
+    sampleCount: moveRows.length,
+    share: moveRows.length > 0 ? hitCount / moveRows.length : null,
+    thresholdUsd: BOUNDARY_MOVE_HEADLINE_THRESHOLD_USD,
+  };
+}
+
+function buildBoundaryMoveThresholdStats(rows, minSampleSize) {
+  const moveRows = getBoundaryMoveRows(rows);
+
+  if (moveRows.length < minSampleSize) {
+    return [];
+  }
+
+  return BOUNDARY_MOVE_THRESHOLD_VALUES.map((thresholdUsd) => {
+    const hitCount = moveRows.filter(
+      (row) => row.boundaryMove.absMoveUsd >= thresholdUsd,
+    ).length;
+
+    return {
+      hitCount,
+      sampleCount: moveRows.length,
+      share: moveRows.length > 0 ? hitCount / moveRows.length : null,
+      thresholdUsd,
+    };
+  });
+}
+
+function buildBoundaryMoveBuckets(rows) {
+  const moveRows = getBoundaryMoveRows(rows);
+
+  return BOUNDARY_MOVE_BUCKETS.map((bucket) => {
+    const count = moveRows.filter((row) => {
+      const moveUsd = row.boundaryMove.absMoveUsd;
+
+      if (moveUsd < bucket.minUsd) {
+        return false;
+      }
+
+      if (bucket.maxUsd == null) {
+        return true;
+      }
+
+      return moveUsd < bucket.maxUsd;
+    }).length;
+
+    return {
+      count,
+      label: bucket.label,
+      maxUsd: bucket.maxUsd,
+      minUsd: bucket.minUsd,
+      share: moveRows.length > 0 ? count / moveRows.length : null,
+    };
+  });
 }
 
 function buildThresholdStats(rows, minSampleSize) {
@@ -522,6 +681,10 @@ export function buildAnalyticsReport({
       minSampleSize,
       quality: filters.quality,
     },
+    boundaryMoveBuckets: buildBoundaryMoveBuckets(rows),
+    boundaryMoveHeadline: buildBoundaryMoveHeadline(rows),
+    boundaryMoveOverview: buildBoundaryMoveOverview(rows),
+    boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
     calibrationRows: buildCalibrationRows(rows, minSampleSize),
     crossingDistributions: buildCrossingDistributions(rows),
     headlineFinding: buildHeadlineFinding(rows),
