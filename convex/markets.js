@@ -114,6 +114,39 @@ export const getBySlug = query({
   },
 });
 
+export const getAdjacentBySlug = query({
+  args: { slug: v.string() },
+  handler: async (ctx, args) => {
+    const market = await ctx.db
+      .query("markets")
+      .withIndex("by_slug", (q) => q.eq("slug", args.slug))
+      .unique();
+
+    if (!market) {
+      return {
+        next: null,
+        previous: null,
+      };
+    }
+
+    const previous = await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs", (q) => q.lt("windowStartTs", market.windowStartTs))
+      .order("desc")
+      .first();
+    const next = await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs", (q) => q.gt("windowStartTs", market.windowStartTs))
+      .order("asc")
+      .first();
+
+    return {
+      next,
+      previous,
+    };
+  },
+});
+
 export const seedDemoMarket = mutation({
   args: { slug: v.optional(v.string()) },
   handler: async (ctx, args) => {

@@ -150,8 +150,40 @@ function getBtcDomain(timeline) {
   return [min - padding, max + padding];
 }
 
+function MarketPagerButton({ direction, market }) {
+  const isPrevious = direction === "previous";
+  const title = isPrevious ? "Previous market" : "Next market";
+
+  if (!market) {
+    return (
+      <div className="rounded-[1.2rem] border border-dashed border-stone-300 bg-white/70 px-4 py-4 text-sm text-stone-500">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-400">
+          {title}
+        </p>
+        <p className="mt-2">No saved market in that direction.</p>
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={`/markets/${market.slug}`}
+      className="group rounded-[1.2rem] border border-black/10 bg-white/80 px-4 py-4 transition-colors hover:border-stone-300 hover:bg-white"
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+        {title}
+      </p>
+      <p className="mt-2 text-sm font-semibold text-stone-950 transition-colors group-hover:text-amber-700">
+        {formatEtRange(market.windowStartTs, market.windowEndTs)}
+      </p>
+      <p className="mt-1 text-xs leading-6 text-stone-600">{market.slug}</p>
+    </Link>
+  );
+}
+
 export default function MarketDetailScaffold({ slug }) {
   const market = useQuery(api.markets.getBySlug, { slug });
+  const adjacentMarkets = useQuery(api.markets.getAdjacentBySlug, { slug });
   const latestSnapshot = useQuery(api.snapshots.getLatestByMarketSlug, { slug });
   const replaySnapshots = useQuery(api.snapshots.listByMarketSlug, {
     slug,
@@ -161,6 +193,7 @@ export default function MarketDetailScaffold({ slug }) {
 
   if (
     market === undefined ||
+    adjacentMarkets === undefined ||
     latestSnapshot === undefined ||
     replaySnapshots === undefined ||
     marketSummary === undefined
@@ -226,12 +259,28 @@ export default function MarketDetailScaffold({ slug }) {
 
   return (
     <section className="space-y-6">
-      <Link
-        href="/"
-        className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-950 hover:text-stone-50"
-      >
-        Back to dashboard
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          href="/markets"
+          className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-950 hover:text-stone-50"
+        >
+          Back to markets
+        </Link>
+        <Link
+          href="/"
+          className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-950 hover:text-stone-50"
+        >
+          Dashboard
+        </Link>
+      </div>
+
+      <section className="grid gap-3 lg:grid-cols-2">
+        <MarketPagerButton
+          direction="previous"
+          market={adjacentMarkets.previous}
+        />
+        <MarketPagerButton direction="next" market={adjacentMarkets.next} />
+      </section>
 
       <section className="grid gap-5 rounded-[1.9rem] border border-black/10 bg-[linear-gradient(145deg,rgba(255,252,245,0.96),rgba(244,246,255,0.9))] p-8 shadow-[0_20px_60px_rgba(24,24,24,0.08)] lg:grid-cols-[1.15fr_0.85fr]">
         <div>
