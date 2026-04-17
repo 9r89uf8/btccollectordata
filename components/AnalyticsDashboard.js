@@ -173,12 +173,12 @@ function formatRelativeSecond(value) {
   return `T+${formatCount(value)}s`;
 }
 
-function formatBtcLockHeadline(headline) {
+function formatBtcWinningSideHeadline(headline) {
   if (!headline || headline.sampleCount === 0) {
-    return "No finalized markets match the current filters for BTC-path lock timing yet.";
+    return "No finalized markets match the current filters for BTC first-winning-side timing yet.";
   }
 
-  return `${formatProbability(headline.share)} of filtered markets were BTC-secured by ${headline.checkpointLabel}.`;
+  return `${formatProbability(headline.share)} of filtered markets first reached the eventual winning side by ${headline.checkpointLabel}.`;
 }
 
 function formatCadenceMix(rows) {
@@ -278,24 +278,22 @@ const EMPTY_BOUNDARY_MOVE_OVERVIEW = {
 
 const EMPTY_BOUNDARY_MOVE_ROWS = [];
 
-const EMPTY_BTC_LOCK_OVERVIEW = {
-  anchorMismatchCount: 0,
+const EMPTY_BTC_WINNING_SIDE_OVERVIEW = {
   conflictCount: 0,
-  lockedCount: 0,
-  medianSecureSecond: null,
+  matchingCount: 0,
+  medianWinningSideSecond: null,
   missingAnchorCount: 0,
   noBtcDataCount: 0,
-  p25SecureSecond: null,
-  p75SecureSecond: null,
+  p25WinningSideSecond: null,
+  p75WinningSideSecond: null,
   sampleCount: 0,
-  sparseTailCount: 0,
-  unsecuredCount: 0,
+  neverMatchedCount: 0,
 };
 
-const EMPTY_BTC_LOCK_HEADLINE = {
+const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
   checkpointLabel: "T+120",
   checkpointSecond: 120,
-  lockedCount: 0,
+  matchingCount: 0,
   sampleCount: 0,
   share: null,
 };
@@ -358,11 +356,11 @@ export default function AnalyticsDashboard() {
     boundaryMoveHeadline = null,
     boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
     boundaryMoveThresholdStats = [],
-    btcLockCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcLockCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcLockHeadline = EMPTY_BTC_LOCK_HEADLINE,
-    btcLockOutcomeSplit = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcLockOverview = EMPTY_BTC_LOCK_OVERVIEW,
+    btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcWinningSideCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcWinningSideHeadline = EMPTY_BTC_WINNING_SIDE_HEADLINE,
+    btcWinningSideOutcomeSplit = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcWinningSideOverview = EMPTY_BTC_WINNING_SIDE_OVERVIEW,
     appliedFilters = EMPTY_APPLIED_FILTERS,
     calibrationRows = [],
     crossingDistributions = [],
@@ -683,62 +681,61 @@ export default function AnalyticsDashboard() {
       </TableShell>
 
       <TableShell
-        caption="BTC-path lock timing"
-        title="When the eventual BTC winner becomes secured"
+        caption="BTC first winning side"
+        title="When BTC first reaches the eventual winning side"
       >
         <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          A market is treated as BTC-secured once BTC is on the eventual winning
-          side of the anchor and never crosses back on any later observed live
-          bucket. Mixed snapshot cadence changes what "earliest observable lock"
-          means, so keep the cadence mix in mind when comparing date ranges.
+          This block answers a simpler question than the old lock metric: when
+          was BTC first on the eventual winning side of the anchor price? It
+          does not require BTC to stay there for the rest of the window.
         </p>
         <p className="mb-5 text-sm leading-7 text-stone-600">
-          Cadence mix: {formatCadenceMix(btcLockCadenceMix)}
+          Cadence mix: {formatCadenceMix(btcWinningSideCadenceMix)}
         </p>
 
-        {btcLockOverview.sampleCount === 0 ? (
-          <EmptyTable message="No finalized markets currently match the filters for BTC-path lock timing." />
+        {btcWinningSideOverview.sampleCount === 0 ? (
+          <EmptyTable message="No finalized markets currently match the filters for BTC first-winning-side timing." />
         ) : (
           <div className="space-y-6">
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
               <MetricPanel
-                label="Locked by T+120"
+                label="Reached by T+120"
                 value={
-                  btcLockHeadline.sampleCount > 0
-                    ? formatProbability(btcLockHeadline.share)
+                  btcWinningSideHeadline.sampleCount > 0
+                    ? formatProbability(btcWinningSideHeadline.share)
                     : "No sample"
                 }
-                detail={formatBtcLockHeadline(btcLockHeadline)}
+                detail={formatBtcWinningSideHeadline(btcWinningSideHeadline)}
               />
               <MetricPanel
-                label="Locked sample"
-                value={`${formatCount(btcLockOverview.lockedCount)} / ${formatCount(btcLockOverview.sampleCount)}`}
-                detail="Markets with a non-null first BTC secure second inside the filtered summary set."
+                label="Matching sample"
+                value={`${formatCount(btcWinningSideOverview.matchingCount)} / ${formatCount(btcWinningSideOverview.sampleCount)}`}
+                detail="Markets with a non-null first BTC winning-side second inside the filtered summary set."
               />
               <MetricPanel
-                label="Median lock time"
-                value={formatRelativeSecond(btcLockOverview.medianSecureSecond)}
-                detail="Median earliest observed secure second across locked markets."
+                label="Median first match"
+                value={formatRelativeSecond(btcWinningSideOverview.medianWinningSideSecond)}
+                detail="Median earliest observed second when BTC first reached the eventual winning side."
               />
               <MetricPanel
-                label="P25 lock time"
-                value={formatRelativeSecond(btcLockOverview.p25SecureSecond)}
-                detail="25th-percentile secure timing across locked markets."
+                label="P25 first match"
+                value={formatRelativeSecond(btcWinningSideOverview.p25WinningSideSecond)}
+                detail="25th-percentile first-winning-side timing across matching markets."
               />
               <MetricPanel
-                label="P75 lock time"
-                value={formatRelativeSecond(btcLockOverview.p75SecureSecond)}
-                detail="75th-percentile secure timing across locked markets."
+                label="P75 first match"
+                value={formatRelativeSecond(btcWinningSideOverview.p75WinningSideSecond)}
+                detail="75th-percentile first-winning-side timing across matching markets."
               />
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
               <div className="space-y-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  Secured by checkpoint
+                  First winning-side by checkpoint
                 </p>
-                {btcLockCheckpointStats.length === 0 ? (
-                  <EmptyTable message="No BTC lock checkpoint rows meet the current support floor." />
+                {btcWinningSideCheckpointStats.length === 0 ? (
+                  <EmptyTable message="No BTC first-winning-side checkpoint rows meet the current support floor." />
                 ) : (
                   <div className="overflow-auto rounded-[1.2rem] border border-black/10">
                     <table className="min-w-full text-left text-sm text-stone-700">
@@ -746,12 +743,12 @@ export default function AnalyticsDashboard() {
                         <tr>
                           <th className="px-4 py-3 font-semibold">Checkpoint</th>
                           <th className="px-4 py-3 font-semibold">Markets</th>
-                          <th className="px-4 py-3 font-semibold">Secured by then</th>
-                          <th className="px-4 py-3 font-semibold">Share</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {btcLockCheckpointStats.map((row) => (
+                        <th className="px-4 py-3 font-semibold">Reached winning side</th>
+                        <th className="px-4 py-3 font-semibold">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                        {btcWinningSideCheckpointStats.map((row) => (
                           <tr
                             key={row.checkpointSecond}
                             className="border-t border-stone-200/80 bg-white"
@@ -760,7 +757,7 @@ export default function AnalyticsDashboard() {
                               {row.checkpointLabel}
                             </td>
                             <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                            <td className="px-4 py-3">{formatCount(row.lockedCount)}</td>
+                            <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
                             <td className="px-4 py-3">{formatProbability(row.share)}</td>
                           </tr>
                         ))}
@@ -774,31 +771,31 @@ export default function AnalyticsDashboard() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
                   Outcome split
                 </p>
-                {btcLockOutcomeSplit.length === 0 ? (
-                  <EmptyTable message="No Up/Down BTC lock rows meet the current support floor." />
+                {btcWinningSideOutcomeSplit.length === 0 ? (
+                  <EmptyTable message="No Up/Down BTC first-winning-side rows meet the current support floor." />
                 ) : (
                   <div className="overflow-auto rounded-[1.2rem] border border-black/10">
                     <table className="min-w-full text-left text-sm text-stone-700">
                       <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
                         <tr>
-                          <th className="px-4 py-3 font-semibold">Outcome</th>
-                          <th className="px-4 py-3 font-semibold">Markets</th>
-                          <th className="px-4 py-3 font-semibold">Locked</th>
-                          <th className="px-4 py-3 font-semibold">Share</th>
-                          <th className="px-4 py-3 font-semibold">Median lock</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {btcLockOutcomeSplit.map((row) => (
+                        <th className="px-4 py-3 font-semibold">Outcome</th>
+                        <th className="px-4 py-3 font-semibold">Markets</th>
+                        <th className="px-4 py-3 font-semibold">Reached side</th>
+                        <th className="px-4 py-3 font-semibold">Share</th>
+                        <th className="px-4 py-3 font-semibold">Median first match</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                        {btcWinningSideOutcomeSplit.map((row) => (
                           <tr key={row.side} className="border-t border-stone-200/80 bg-white">
                             <td className="px-4 py-3 font-medium text-stone-950">
                               {formatSideLabel(row.side)}
                             </td>
                             <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                            <td className="px-4 py-3">{formatCount(row.lockedCount)}</td>
+                            <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
                             <td className="px-4 py-3">{formatProbability(row.share)}</td>
                             <td className="px-4 py-3">
-                              {formatRelativeSecond(row.medianSecureSecond)}
+                              {formatRelativeSecond(row.medianWinningSideSecond)}
                             </td>
                           </tr>
                         ))}
@@ -809,21 +806,16 @@ export default function AnalyticsDashboard() {
 
                 <div className="rounded-[1.2rem] border border-black/10 bg-stone-50 px-5 py-4 text-sm leading-7 text-stone-700">
                   <p>
-                    Conflicts: {formatCount(btcLockOverview.conflictCount)} BTC-path
+                    Conflicts: {formatCount(btcWinningSideOverview.conflictCount)} BTC-path
                     vs resolved-outcome disagreements.
                   </p>
                   <p>
-                    Anchor mismatches: {formatCount(btcLockOverview.anchorMismatchCount)} rows
-                    where the official anchor side disagrees with the derived start/end path.
+                    Never reached winning side: {formatCount(btcWinningSideOverview.neverMatchedCount)} filtered markets.
                   </p>
                   <p>
-                    Sparse tails: {formatCount(btcLockOverview.sparseTailCount)} rows with
-                    thin BTC coverage after the secure point.
-                  </p>
-                  <p>
-                    Missing anchor / no BTC data: {formatCount(btcLockOverview.missingAnchorCount)} /
+                    Missing anchor / no BTC data: {formatCount(btcWinningSideOverview.missingAnchorCount)} /
                     {" "}
-                    {formatCount(btcLockOverview.noBtcDataCount)}.
+                    {formatCount(btcWinningSideOverview.noBtcDataCount)}.
                   </p>
                 </div>
               </div>

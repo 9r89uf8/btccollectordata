@@ -7,7 +7,6 @@ import {
 
 export const SUMMARY_CHECKPOINT_SECONDS = [0, 15, 30, 60, 120, 240, 295];
 export const REQUIRED_CHECKPOINT_SECONDS = [0, 15, 30, 60, 120];
-const BTC_SECURE_SPARSE_TAIL_THRESHOLD = 0.3;
 
 function toFiniteNumber(value) {
   if (value == null || value === "") {
@@ -269,101 +268,29 @@ function matchesWinner(delta, winner) {
   return delta < 0;
 }
 
-function computeFirstBtcSecureSecond({
-  anchor,
-  endReferencePrice,
-  liveSnapshots,
-  winner,
-}) {
+function computeFirstBtcWinningSideSecond({ anchor, liveSnapshots, winner }) {
   const normalizedAnchor = toFiniteNumber(anchor);
-  const normalizedEndReferencePrice = toFiniteNumber(endReferencePrice);
 
-  if (
-    normalizedAnchor === null ||
-    normalizedEndReferencePrice === null ||
-    !winner
-  ) {
-    return {
-      firstBtcSecureSecond: null,
-      sparseTail: false,
-    };
+  if (normalizedAnchor === null || !winner) {
+    return null;
   }
+  const winningSnapshot = liveSnapshots.find((snapshot) => {
+    const btcChainlink = toFiniteNumber(snapshot.btcChainlink);
 
-  if (
-    !matchesWinner(
-      normalizedEndReferencePrice - normalizedAnchor,
-      winner,
-    )
-  ) {
-    return {
-      firstBtcSecureSecond: null,
-      sparseTail: false,
-    };
-  }
-
-  const liveSnapshotsWithBtc = liveSnapshots.filter(
-    (snapshot) => toFiniteNumber(snapshot.btcChainlink) !== null,
-  );
-
-  if (liveSnapshotsWithBtc.length === 0) {
-    return {
-      firstBtcSecureSecond: null,
-      sparseTail: false,
-    };
-  }
-
-  let lastViolatingSecond = null;
-
-  for (const snapshot of liveSnapshotsWithBtc) {
-    const delta = toFiniteNumber(snapshot.btcChainlink) - normalizedAnchor;
-
-    if (!matchesWinner(delta, winner)) {
-      lastViolatingSecond = snapshot.secondsFromWindowStart;
-    }
-  }
-
-  const secureSnapshot = liveSnapshotsWithBtc.find((snapshot) => {
-    if (
-      lastViolatingSecond != null &&
-      snapshot.secondsFromWindowStart <= lastViolatingSecond
-    ) {
+    if (btcChainlink === null) {
       return false;
     }
 
-    const delta = toFiniteNumber(snapshot.btcChainlink) - normalizedAnchor;
-    return matchesWinner(delta, winner);
+    return matchesWinner(btcChainlink - normalizedAnchor, winner);
   });
 
-  if (!secureSnapshot) {
-    return {
-      firstBtcSecureSecond: null,
-      sparseTail: false,
-    };
-  }
-
-  const tailSnapshots = liveSnapshots.filter(
-    (snapshot) =>
-      snapshot.secondsFromWindowStart > secureSnapshot.secondsFromWindowStart,
-  );
-  const nullTailBtcCount = tailSnapshots.filter(
-    (snapshot) => toFiniteNumber(snapshot.btcChainlink) === null,
-  ).length;
-  const sparseTail =
-    tailSnapshots.length > 0 &&
-    nullTailBtcCount / tailSnapshots.length > BTC_SECURE_SPARSE_TAIL_THRESHOLD;
-
-  return {
-    firstBtcSecureSecond: secureSnapshot.secondsFromWindowStart,
-    sparseTail,
-  };
+  return winningSnapshot ? winningSnapshot.secondsFromWindowStart : null;
 }
 
 function buildQualityFlags({
-  btcSecureEndOffAnchorSide,
-  btcSecureMissingAnchor,
-  btcSecureNoBtcData,
-  btcSecureSparseTail,
   btcPathConflictsResolved,
+  btcWinningSideMissingAnchor,
+  btcWinningSideNoBtcData,
   checkpointValues,
   endReference,
   expectedLiveDurationSeconds,
@@ -381,24 +308,16 @@ function buildQualityFlags({
     flags.push("missing_resolved_outcome");
   }
 
-  if (btcSecureMissingAnchor) {
-    flags.push("btc_secure_missing_anchor");
+  if (btcWinningSideMissingAnchor) {
+    flags.push("btc_winning_side_missing_anchor");
   }
 
-  if (btcSecureNoBtcData) {
-    flags.push("btc_secure_no_btc_data");
+  if (btcWinningSideNoBtcData) {
+    flags.push("btc_winning_side_no_btc_data");
   }
 
   if (btcPathConflictsResolved) {
     flags.push("btc_path_conflicts_resolved");
-  }
-
-  if (btcSecureEndOffAnchorSide) {
-    flags.push("btc_secure_end_off_anchor_side");
-  }
-
-  if (btcSecureSparseTail) {
-    flags.push("btc_secure_sparse_tail");
   }
 
   if (usedDerivedOutcome) {
@@ -523,28 +442,21 @@ export function buildMarketSummary({
     endReference.chainlinkPrice,
   );
   const resolvedOutcome = market.winningOutcome ?? derivedOutcome;
-  const secureAnchor = market.priceToBeatOfficial ?? startReference.chainlinkPrice;
+  const winningSideAnchor =
+    market.priceToBeatOfficial ?? startReference.chainlinkPrice;
   const usedDerivedOutcome = market.winningOutcome == null && derivedOutcome != null;
-  const btcSecureMissingAnchor = toFiniteNumber(secureAnchor) === null;
+  const btcWinningSideMissingAnchor =
+    toFiniteNumber(winningSideAnchor) === null;
   const btcPathConflictsResolved =
     market.winningOutcome != null &&
     derivedOutcome != null &&
     market.winningOutcome !== derivedOutcome;
-  const btcSecureEndOffAnchorSide =
-    market.priceToBeatOfficial != null &&
-    derivedOutcome != null &&
-    endReference.chainlinkPrice != null &&
-    !matchesWinner(
-      endReference.chainlinkPrice - market.priceToBeatOfficial,
-      derivedOutcome,
-    );
-  const secureTiming = computeFirstBtcSecureSecond({
-    anchor: secureAnchor,
-    endReferencePrice: endReference.chainlinkPrice,
+  const winningSideTiming = computeFirstBtcWinningSideSecond({
+    anchor: winningSideAnchor,
     liveSnapshots,
     winner: resolvedOutcome,
   });
-  const btcSecureNoBtcData =
+  const btcWinningSideNoBtcData =
     liveSnapshots.filter(
       (snapshot) => toFiniteNumber(snapshot.btcChainlink) !== null,
     ).length === 0;
@@ -572,11 +484,9 @@ export function buildMarketSummary({
   );
   const stats = computeStats(liveSnapshots);
   const qualityFlags = buildQualityFlags({
-    btcSecureEndOffAnchorSide,
-    btcSecureMissingAnchor,
-    btcSecureNoBtcData,
-    btcSecureSparseTail: secureTiming.sparseTail,
     btcPathConflictsResolved,
+    btcWinningSideMissingAnchor,
+    btcWinningSideNoBtcData,
     checkpointValues: upCheckpointValues,
     endReference,
     expectedLiveDurationSeconds,
@@ -646,7 +556,7 @@ export function buildMarketSummary({
       firstTimeAbove60: getFirstCrossingTime(liveSnapshots, 0.6),
       firstTimeAbove70: getFirstCrossingTime(liveSnapshots, 0.7),
       firstTimeAbove80: getFirstCrossingTime(liveSnapshots, 0.8),
-      firstBtcSecureSecond: secureTiming.firstBtcSecureSecond,
+      firstBtcWinningSideSecond: winningSideTiming,
       qualityFlags,
       finalizedAt: nowTs,
     },

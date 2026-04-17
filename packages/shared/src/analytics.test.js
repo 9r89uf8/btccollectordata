@@ -16,7 +16,7 @@ function buildSummary({
   btcChainlinkAtStart = null,
   closeReferencePriceDerived = null,
   closeReferencePriceOfficial = null,
-  firstBtcSecureSecond = null,
+  firstBtcWinningSideSecond = null,
   d15 = null,
   d30 = null,
   d60 = null,
@@ -53,7 +53,7 @@ function buildSummary({
     downDisplayedAtT240: d240,
     downDisplayedAtT295: d295,
     finalizedAt: windowStartTs + 301_000,
-    firstBtcSecureSecond,
+    firstBtcWinningSideSecond,
     firstTimeAbove60,
     firstTimeAbove70,
     firstTimeAbove80,
@@ -395,7 +395,7 @@ test("buildAnalyticsReport groups BTC boundary moves by ET hour and session", ()
   assert.equal(evening.maxAbsMoveUsd, 90);
 });
 
-test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix", () => {
+test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence mix", () => {
   const markets = [
     buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m1" }),
     buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m2" }),
@@ -404,7 +404,7 @@ test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix"
   ];
   const summaries = [
     buildSummary({
-      firstBtcSecureSecond: 0,
+      firstBtcWinningSideSecond: 0,
       priceToBeatOfficial: 74_000,
       qualityFlags: ["sample_cadence_ms:1000"],
       resolvedOutcome: MARKET_OUTCOMES.UP,
@@ -412,15 +412,15 @@ test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix"
       windowStartTs: 1_000,
     }),
     buildSummary({
-      firstBtcSecureSecond: 60,
+      firstBtcWinningSideSecond: 60,
       priceToBeatOfficial: 74_000,
-      qualityFlags: ["sample_cadence_ms:5000", "btc_secure_sparse_tail"],
+      qualityFlags: ["sample_cadence_ms:5000"],
       resolvedOutcome: MARKET_OUTCOMES.DOWN,
       slug: "m2",
       windowStartTs: 2_000,
     }),
     buildSummary({
-      firstBtcSecureSecond: null,
+      firstBtcWinningSideSecond: null,
       priceToBeatOfficial: 74_000,
       qualityFlags: ["sample_cadence_ms:5000", "btc_path_conflicts_resolved"],
       resolvedOutcome: MARKET_OUTCOMES.UP,
@@ -428,9 +428,9 @@ test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix"
       windowStartTs: 3_000,
     }),
     buildSummary({
-      firstBtcSecureSecond: 240,
+      firstBtcWinningSideSecond: 240,
       priceToBeatOfficial: 74_000,
-      qualityFlags: ["sample_cadence_ms:5000", "btc_secure_end_off_anchor_side"],
+      qualityFlags: ["sample_cadence_ms:5000"],
       resolvedOutcome: MARKET_OUTCOMES.DOWN,
       slug: "m4",
       windowStartTs: 4_000,
@@ -448,28 +448,26 @@ test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix"
     summaries,
   });
 
-  assert.deepEqual(result.btcLockHeadline, {
+  assert.deepEqual(result.btcWinningSideHeadline, {
     checkpointLabel: "T+120",
     checkpointSecond: 120,
-    lockedCount: 2,
+    matchingCount: 2,
     sampleCount: 4,
     share: 0.5,
   });
-  assert.deepEqual(result.btcLockOverview, {
-    anchorMismatchCount: 1,
+  assert.deepEqual(result.btcWinningSideOverview, {
     conflictCount: 1,
-    lockedCount: 3,
-    medianSecureSecond: 60,
+    matchingCount: 3,
+    medianWinningSideSecond: 60,
     missingAnchorCount: 0,
     noBtcDataCount: 0,
-    p25SecureSecond: 0,
-    p75SecureSecond: 240,
+    p25WinningSideSecond: 0,
+    p75WinningSideSecond: 240,
     sampleCount: 4,
-    sparseTailCount: 1,
-    unsecuredCount: 1,
+    neverMatchedCount: 1,
   });
 
-  assert.deepEqual(result.btcLockCadenceMix, [
+  assert.deepEqual(result.btcWinningSideCadenceMix, [
     {
       label: "1s",
       sampleCadenceMs: 1000,
@@ -484,41 +482,41 @@ test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix"
     },
   ]);
 
-  const by15 = result.btcLockCheckpointStats.find(
+  const by15 = result.btcWinningSideCheckpointStats.find(
     (row) => row.checkpointSecond === 15,
   );
   assert.deepEqual(by15, {
     checkpointLabel: "T+15",
     checkpointSecond: 15,
-    lockedCount: 1,
+    matchingCount: 1,
     sampleCount: 4,
     share: 0.25,
   });
 
-  const by240 = result.btcLockCheckpointStats.find(
+  const by240 = result.btcWinningSideCheckpointStats.find(
     (row) => row.checkpointSecond === 240,
   );
   assert.deepEqual(by240, {
     checkpointLabel: "T+240",
     checkpointSecond: 240,
-    lockedCount: 3,
+    matchingCount: 3,
     sampleCount: 4,
     share: 0.75,
   });
 
-  assert.deepEqual(result.btcLockOutcomeSplit, [
+  assert.deepEqual(result.btcWinningSideOutcomeSplit, [
     {
-      lockedCount: 1,
-      medianSecureSecond: 0,
-      p75SecureSecond: 0,
+      matchingCount: 1,
+      medianWinningSideSecond: 0,
+      p75WinningSideSecond: 0,
       sampleCount: 2,
       share: 0.5,
       side: MARKET_OUTCOMES.UP,
     },
     {
-      lockedCount: 2,
-      medianSecureSecond: 60,
-      p75SecureSecond: 240,
+      matchingCount: 2,
+      medianWinningSideSecond: 60,
+      p75WinningSideSecond: 240,
       sampleCount: 2,
       share: 1,
       side: MARKET_OUTCOMES.DOWN,

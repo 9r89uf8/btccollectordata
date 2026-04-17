@@ -63,7 +63,7 @@ test("buildMarketSummary computes checkpoint stats and good quality from complet
   assert.equal(result.summary.firstTimeAbove60, 2);
   assert.equal(result.summary.firstTimeAbove70, 3);
   assert.equal(result.summary.firstTimeAbove80, null);
-  assert.equal(result.summary.firstBtcSecureSecond, 0);
+  assert.equal(result.summary.firstBtcWinningSideSecond, 0);
   assert.deepEqual(result.qualityFlags, ["sample_cadence_ms:1000"]);
 });
 
@@ -199,7 +199,7 @@ test("buildMarketSummary falls back to derived outcome and marks gap data correc
   assert.ok(result.qualityFlags.includes("stale_book_buckets:1"));
 });
 
-test("buildMarketSummary re-locks after the last BTC violation", () => {
+test("buildMarketSummary records the first winning-side bucket even if BTC later crosses back", () => {
   const market = {
     closeReferencePriceOfficial: 101,
     marketId: "test-market",
@@ -220,10 +220,10 @@ test("buildMarketSummary re-locks after the last BTC violation", () => {
 
   const result = buildMarketSummary({ market, nowTs: 310_000, snapshots });
 
-  assert.equal(result.summary.firstBtcSecureSecond, 240);
+  assert.equal(result.summary.firstBtcWinningSideSecond, 30);
 });
 
-test("buildMarketSummary flags resolved-outcome conflicts against the BTC path", () => {
+test("buildMarketSummary still records the first winning-side bucket when the close path conflicts with the resolved outcome", () => {
   const market = {
     closeReferencePriceOfficial: null,
     marketId: "test-market",
@@ -257,7 +257,7 @@ test("buildMarketSummary flags resolved-outcome conflicts against the BTC path",
     snapshots,
   });
 
-  assert.equal(result.summary.firstBtcSecureSecond, null);
+  assert.equal(result.summary.firstBtcWinningSideSecond, 0);
   assert.ok(result.qualityFlags.includes("btc_path_conflicts_resolved"));
 });
 
@@ -278,9 +278,9 @@ test("buildMarketSummary flags missing anchors when secure timing cannot be anch
 
   const result = buildMarketSummary({ market, nowTs: 10_000, snapshots });
 
-  assert.equal(result.summary.firstBtcSecureSecond, null);
-  assert.ok(result.qualityFlags.includes("btc_secure_missing_anchor"));
-  assert.ok(result.qualityFlags.includes("btc_secure_no_btc_data"));
+  assert.equal(result.summary.firstBtcWinningSideSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_winning_side_missing_anchor"));
+  assert.ok(result.qualityFlags.includes("btc_winning_side_no_btc_data"));
 });
 
 test("buildMarketSummary flags missing live BTC data when the anchor exists", () => {
@@ -301,12 +301,12 @@ test("buildMarketSummary flags missing live BTC data when the anchor exists", ()
 
   const result = buildMarketSummary({ market, nowTs: 10_000, snapshots });
 
-  assert.equal(result.summary.firstBtcSecureSecond, null);
-  assert.ok(result.qualityFlags.includes("btc_secure_no_btc_data"));
-  assert.equal(result.qualityFlags.includes("btc_secure_missing_anchor"), false);
+  assert.equal(result.summary.firstBtcWinningSideSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_winning_side_no_btc_data"));
+  assert.equal(result.qualityFlags.includes("btc_winning_side_missing_anchor"), false);
 });
 
-test("buildMarketSummary flags official-anchor mismatches against the derived start/end path", () => {
+test("buildMarketSummary uses the official anchor when finding the first winning-side bucket", () => {
   const market = {
     closeReferencePriceOfficial: null,
     marketId: "test-market",
@@ -318,6 +318,7 @@ test("buildMarketSummary flags official-anchor mismatches against the derived st
   };
   const snapshots = [
     buildSnapshot({ btcChainlink: 100.4, phase: "live", second: 0, upDisplayed: 0.54 }),
+    buildSnapshot({ btcChainlink: 99.9, phase: "live", second: 4, upDisplayed: 0.46 }),
     buildSnapshot({ btcChainlink: 100.3, phase: "post", second: 5, upDisplayed: 0.51 }),
   ];
 
@@ -340,6 +341,5 @@ test("buildMarketSummary flags official-anchor mismatches against the derived st
   });
 
   assert.equal(result.summary.resolvedOutcome, MARKET_OUTCOMES.DOWN);
-  assert.equal(result.summary.firstBtcSecureSecond, null);
-  assert.ok(result.qualityFlags.includes("btc_secure_end_off_anchor_side"));
+  assert.equal(result.summary.firstBtcWinningSideSecond, 4);
 });
