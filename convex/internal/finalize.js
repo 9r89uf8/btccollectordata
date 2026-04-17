@@ -30,6 +30,17 @@ async function getSnapshotsByMarketSlug(ctx, slug) {
     .collect();
 }
 
+async function listEndedMarketsPage(ctx, { beforeWindowEndTs, limit, nowTs }) {
+  const upperBound =
+    beforeWindowEndTs == null ? nowTs : Math.min(beforeWindowEndTs, nowTs);
+
+  return await ctx.db
+    .query("markets")
+    .withIndex("by_windowEndTs", (q) => q.lte("windowEndTs", upperBound))
+    .order("desc")
+    .take(limit);
+}
+
 function summaryNeedsRefresh(market, existingSummary) {
   if (!existingSummary) {
     return false;
@@ -193,40 +204,61 @@ export const finalizeEligibleMarkets = internalMutation({
     const force = args.force ?? false;
     const limit = Math.max(1, Math.min(args.limit ?? 25, 200));
     const nowTs = Date.now();
-    const [allMarkets, summaryRows] = await Promise.all([
-      ctx.db.query("markets").collect(),
-      ctx.db.query("market_summaries").collect(),
-    ]);
-    const summaryBySlug = new Map(
-      summaryRows.map((summary) => [summary.marketSlug, summary]),
-    );
-    const eligibleMarkets = allMarkets
-      .filter((market) => {
-        const ended = market.windowEndTs <= nowTs;
+    const pageSize = Math.min(200, Math.max(limit * 2, 50));
+    const eligibleMarkets = [];
+    let scanned = 0;
+    let cursorWindowEndTs = nowTs;
 
-        if (!ended) {
-          return false;
-        }
+    while (eligibleMarkets.length < limit) {
+      const page = await listEndedMarketsPage(ctx, {
+        beforeWindowEndTs: cursorWindowEndTs,
+        limit: pageSize,
+        nowTs,
+      });
+
+      if (page.length === 0) {
+        break;
+      }
+
+      for (const market of page) {
+        scanned += 1;
 
         if (force) {
-          return true;
+          eligibleMarkets.push(market);
+        } else {
+          const existingSummary = await getSummaryByMarketSlug(ctx, market.slug);
+
+          if (!existingSummary || summaryNeedsRefresh(market, existingSummary)) {
+            eligibleMarkets.push(market);
+          }
         }
 
-        const existingSummary = summaryBySlug.get(market.slug);
-
-        return !existingSummary || summaryNeedsRefresh(market, existingSummary);
-      })
-      .sort((a, b) => {
-        const priorityDelta =
-          getFinalizationPriority(b) - getFinalizationPriority(a);
-
-        if (priorityDelta !== 0) {
-          return priorityDelta;
+        if (eligibleMarkets.length >= limit) {
+          break;
         }
+      }
 
-        return b.windowEndTs - a.windowEndTs;
-      })
-      .slice(0, limit);
+      if (page.length < pageSize) {
+        break;
+      }
+
+      cursorWindowEndTs = page[page.length - 1].windowEndTs - 1;
+
+      if (cursorWindowEndTs < 0) {
+        break;
+      }
+    }
+
+    eligibleMarkets.sort((a, b) => {
+      const priorityDelta =
+        getFinalizationPriority(b) - getFinalizationPriority(a);
+
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return b.windowEndTs - a.windowEndTs;
+    });
     const results = [];
 
     for (const market of eligibleMarkets) {
@@ -238,7 +270,7 @@ export const finalizeEligibleMarkets = internalMutation({
       );
     }
 
-    return summarizeFinalizationResults(results, eligibleMarkets.length);
+    return summarizeFinalizationResults(results, scanned);
   },
 });
 
@@ -288,26 +320,22 @@ export const listRecentClosedSyncCandidates = internalQuery({
     const limit = Math.max(1, Math.min(args.limit ?? 50, 200));
     const lookbackMs = Math.max(60_000, Math.min(args.lookbackMs ?? 12 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000));
     const nowTs = Date.now();
-    const markets = await ctx.db.query("markets").collect();
+    const markets = await ctx.db
+      .query("markets")
+      .withIndex("by_windowEndTs", (q) =>
+        q.gte("windowEndTs", nowTs - lookbackMs).lte("windowEndTs", nowTs),
+      )
+      .order("desc")
+      .collect();
 
     return markets
-      .filter((market) => {
-        const recentlyEnded =
-          market.windowEndTs <= nowTs && market.windowEndTs >= nowTs - lookbackMs;
-
-        if (!recentlyEnded) {
-          return false;
-        }
-
-        return (
-          market.winningOutcome == null ||
-          market.priceToBeatOfficial == null ||
-          market.closeReferencePriceOfficial == null ||
-          !market.closed ||
-          !market.resolved
-        );
-      })
-      .sort((a, b) => b.windowEndTs - a.windowEndTs)
+      .filter((market) =>
+        market.winningOutcome == null ||
+        market.priceToBeatOfficial == null ||
+        market.closeReferencePriceOfficial == null ||
+        !market.closed ||
+        !market.resolved,
+      )
       .slice(0, limit)
       .map((market) => market.slug);
   },

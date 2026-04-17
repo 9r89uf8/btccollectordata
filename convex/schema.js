@@ -64,6 +64,7 @@ export default defineSchema({
     .index("by_marketId", ["marketId"])
     .index("by_conditionId", ["conditionId"])
     .index("by_windowStartTs", ["windowStartTs"])
+    .index("by_windowEndTs", ["windowEndTs"])
     .index("by_active_windowStartTs", ["active", "windowStartTs"])
     .index("by_resolved_windowEndTs", ["resolved", "windowEndTs"]),
 
