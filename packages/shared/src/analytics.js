@@ -178,6 +178,25 @@ const BTC_WINNING_SIDE_CHECKPOINTS = [
   { label: "T+295", second: 295 },
 ];
 const BTC_WINNING_SIDE_HEADLINE_SECOND = 120;
+const BTC_BEST_SIGNAL_MIN_SAMPLES = 40;
+const BTC_BEST_SIGNAL_TARGETS = [
+  {
+    checkpointSecond: 60,
+    side: MARKET_OUTCOMES.UP,
+  },
+  {
+    checkpointSecond: 60,
+    side: MARKET_OUTCOMES.DOWN,
+  },
+  {
+    checkpointSecond: 120,
+    side: MARKET_OUTCOMES.UP,
+  },
+  {
+    checkpointSecond: 120,
+    side: MARKET_OUTCOMES.DOWN,
+  },
+];
 const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS = [
   {
     field: "btcWinningSideAt10UsdSecond",
@@ -974,6 +993,61 @@ function buildBtcConditionalReliabilityBucketRows(rows, minSampleSize) {
     });
 }
 
+function buildBtcBestSignalCards(rows, minSampleSize) {
+  const effectiveMinSampleSize = Math.max(minSampleSize, BTC_BEST_SIGNAL_MIN_SAMPLES);
+  const bucketRows = buildBtcConditionalReliabilityBucketRows(
+    rows,
+    effectiveMinSampleSize,
+  );
+
+  return {
+    cards: BTC_BEST_SIGNAL_TARGETS.map((target) => {
+      const matchingRows = bucketRows.filter(
+        (row) =>
+          row.checkpointSecond === target.checkpointSecond &&
+          row.side === target.side,
+      );
+
+      if (matchingRows.length === 0) {
+        return {
+          averageDeltaUsd: null,
+          bucketLabel: null,
+          checkpointSecond: target.checkpointSecond,
+          sampleCount: 0,
+          side: target.side,
+          winRate: null,
+        };
+      }
+
+      const bestRow = [...matchingRows].sort((a, b) => {
+        const winRateDelta = (b.winRate ?? -1) - (a.winRate ?? -1);
+
+        if (winRateDelta !== 0) {
+          return winRateDelta;
+        }
+
+        const sampleDelta = b.sampleCount - a.sampleCount;
+
+        if (sampleDelta !== 0) {
+          return sampleDelta;
+        }
+
+        return a.minUsd - b.minUsd;
+      })[0];
+
+      return {
+        averageDeltaUsd: bestRow.averageDeltaUsd,
+        bucketLabel: bestRow.bucketLabel,
+        checkpointSecond: bestRow.checkpointSecond,
+        sampleCount: bestRow.sampleCount,
+        side: bestRow.side,
+        winRate: bestRow.winRate,
+      };
+    }),
+    minSampleSize: effectiveMinSampleSize,
+  };
+}
+
 function buildBtcWinningSideHeadline(rows) {
   const checkpoint = BTC_WINNING_SIDE_CHECKPOINTS.find(
     (item) => item.second === BTC_WINNING_SIDE_HEADLINE_SECOND,
@@ -1219,6 +1293,7 @@ export function buildAnalyticsReport({
     nowTs,
     summaries: Array.isArray(summaries) ? summaries : [],
   });
+  const btcBestSignal = buildBtcBestSignalCards(rows, minSampleSize);
 
   return {
     appliedFilters: {
@@ -1232,6 +1307,8 @@ export function buildAnalyticsReport({
     boundaryMoveHeadline: buildBoundaryMoveHeadline(rows),
     boundaryMoveOverview: buildBoundaryMoveOverview(rows),
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
+    btcBestSignalCards: btcBestSignal.cards,
+    btcBestSignalMinSamples: btcBestSignal.minSampleSize,
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
     btcConditionalReliabilityBucketRows: buildBtcConditionalReliabilityBucketRows(
       rows,

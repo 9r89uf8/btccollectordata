@@ -894,6 +894,182 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
     winCount: 1,
     winRate: 1,
   });
+
+  assert.equal(result.btcBestSignalMinSamples, 40);
+  assert.deepEqual(result.btcBestSignalCards, [
+    {
+      averageDeltaUsd: null,
+      bucketLabel: null,
+      checkpointSecond: 60,
+      sampleCount: 0,
+      side: MARKET_OUTCOMES.UP,
+      winRate: null,
+    },
+    {
+      averageDeltaUsd: null,
+      bucketLabel: null,
+      checkpointSecond: 60,
+      sampleCount: 0,
+      side: MARKET_OUTCOMES.DOWN,
+      winRate: null,
+    },
+    {
+      averageDeltaUsd: null,
+      bucketLabel: null,
+      checkpointSecond: 120,
+      sampleCount: 0,
+      side: MARKET_OUTCOMES.UP,
+      winRate: null,
+    },
+    {
+      averageDeltaUsd: null,
+      bucketLabel: null,
+      checkpointSecond: 120,
+      sampleCount: 0,
+      side: MARKET_OUTCOMES.DOWN,
+      winRate: null,
+    },
+  ]);
+});
+
+test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sample floor", () => {
+  const markets = [];
+  const summaries = [];
+  let counter = 0;
+
+  function appendGroup({
+    count,
+    deltaT60,
+    deltaT120,
+    resolvedOutcome,
+    winningCount,
+  }) {
+    for (let index = 0; index < count; index += 1) {
+      counter += 1;
+      const slug = `best-${counter}`;
+      const isWinningRow = index < winningCount;
+
+      markets.push(buildMarket({ quality: DATA_QUALITY.GOOD, slug }));
+      summaries.push(
+        buildSummary({
+          btcDeltaFromAnchorAtT60: deltaT60,
+          btcDeltaFromAnchorAtT120: deltaT120,
+          priceToBeatOfficial: 74_000,
+          resolvedOutcome: isWinningRow
+            ? resolvedOutcome
+            : resolvedOutcome === MARKET_OUTCOMES.UP
+              ? MARKET_OUTCOMES.DOWN
+              : MARKET_OUTCOMES.UP,
+          slug,
+          windowStartTs: counter * 1_000,
+        }),
+      );
+    }
+  }
+
+  appendGroup({
+    count: 45,
+    deltaT60: 25,
+    deltaT120: null,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 36,
+  });
+  appendGroup({
+    count: 50,
+    deltaT60: 60,
+    deltaT120: null,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 35,
+  });
+  appendGroup({
+    count: 42,
+    deltaT60: -35,
+    deltaT120: null,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 30,
+  });
+  appendGroup({
+    count: 41,
+    deltaT60: -60,
+    deltaT120: null,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 28,
+  });
+  appendGroup({
+    count: 48,
+    deltaT60: null,
+    deltaT120: 55,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 42,
+  });
+  appendGroup({
+    count: 44,
+    deltaT60: null,
+    deltaT120: 35,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 34,
+  });
+  appendGroup({
+    count: 46,
+    deltaT60: null,
+    deltaT120: -25,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 30,
+  });
+  appendGroup({
+    count: 52,
+    deltaT60: null,
+    deltaT120: -65,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 45,
+  });
+
+  const result = buildAnalyticsReport({
+    filters: {
+      dateRange: "all",
+      minSampleSize: 1,
+      quality: "all",
+    },
+    markets,
+    nowTs: counter * 1_000 + 10_000,
+    summaries,
+  });
+
+  assert.equal(result.btcBestSignalMinSamples, 40);
+  assert.deepEqual(result.btcBestSignalCards, [
+    {
+      averageDeltaUsd: 25,
+      bucketLabel: "$20-$29.99",
+      checkpointSecond: 60,
+      sampleCount: 45,
+      side: MARKET_OUTCOMES.UP,
+      winRate: 36 / 45,
+    },
+    {
+      averageDeltaUsd: -35,
+      bucketLabel: "$30-$49.99",
+      checkpointSecond: 60,
+      sampleCount: 42,
+      side: MARKET_OUTCOMES.DOWN,
+      winRate: 30 / 42,
+    },
+    {
+      averageDeltaUsd: 55,
+      bucketLabel: "$50+",
+      checkpointSecond: 120,
+      sampleCount: 48,
+      side: MARKET_OUTCOMES.UP,
+      winRate: 42 / 48,
+    },
+    {
+      averageDeltaUsd: -65,
+      bucketLabel: "$50+",
+      checkpointSecond: 120,
+      sampleCount: 52,
+      side: MARKET_OUTCOMES.DOWN,
+      winRate: 45 / 52,
+    },
+  ]);
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {

@@ -207,6 +207,18 @@ function formatBtcWinningSideHeadline(headline) {
   )}.`;
 }
 
+function formatBestSignalDetail(card, minSampleSize) {
+  if (!card || card.bucketLabel == null) {
+    return `No ${formatSideLabel(card?.side)} bucket at ${formatCheckpointLabel(
+      card?.checkpointSecond ?? 0,
+    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
+  }
+
+  return `${card.bucketLabel} on ${formatCount(card.sampleCount)} samples, average BTC delta ${formatBtcUsd(
+    card.averageDeltaUsd,
+  )}.`;
+}
+
 function formatCadenceMix(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return "Cadence mix unavailable.";
@@ -324,6 +336,8 @@ const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
   share: null,
 };
 
+const EMPTY_BTC_BEST_SIGNAL_ROWS = [];
+
 const EMPTY_OVERVIEW = {
   downWins: 0,
   gapCount: 0,
@@ -382,6 +396,8 @@ export default function AnalyticsDashboard() {
     boundaryMoveHeadline = null,
     boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
     boundaryMoveThresholdStats = [],
+    btcBestSignalCards = EMPTY_BTC_BEST_SIGNAL_ROWS,
+    btcBestSignalMinSamples = 40,
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityBucketRows = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
@@ -756,6 +772,33 @@ export default function AnalyticsDashboard() {
                 value={formatRelativeSecondWithClock(btcWinningSideOverview.p75WinningSideSecond)}
                 detail="75th-percentile first-winning-side timing across matching markets."
               />
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Best signals
+              </p>
+              <p className="max-w-3xl text-sm leading-7 text-stone-700">
+                These cards pick the strongest non-overlapping BTC-distance bucket
+                at the actionable checkpoints only, with a hard minimum support floor
+                of {` ${formatCount(btcBestSignalMinSamples)} `}samples.
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                {btcBestSignalCards.map((card) => (
+                  <MetricPanel
+                    key={`${card.checkpointSecond}-${card.side}`}
+                    label={`Best ${formatSideLabel(card.side)} at ${formatCheckpointLabel(
+                      card.checkpointSecond,
+                    )}`}
+                    value={
+                      card.bucketLabel == null
+                        ? "No signal"
+                        : formatProbability(card.winRate)
+                    }
+                    detail={formatBestSignalDetail(card, btcBestSignalMinSamples)}
+                  />
+                ))}
+              </div>
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
