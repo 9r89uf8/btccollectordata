@@ -14,6 +14,13 @@ function buildMarket({ quality = DATA_QUALITY.GOOD, slug }) {
 function buildSummary({
   btcChainlinkAtEnd = null,
   btcChainlinkAtStart = null,
+  btcDeltaFromAnchorAtT0 = null,
+  btcDeltaFromAnchorAtT15 = null,
+  btcDeltaFromAnchorAtT30 = null,
+  btcDeltaFromAnchorAtT60 = null,
+  btcDeltaFromAnchorAtT120 = null,
+  btcDeltaFromAnchorAtT240 = null,
+  btcDeltaFromAnchorAtT295 = null,
   closeReferencePriceDerived = null,
   closeReferencePriceOfficial = null,
   firstBtcWinningSideAt10UsdSecond = null,
@@ -45,6 +52,13 @@ function buildSummary({
   return {
     btcChainlinkAtEnd,
     btcChainlinkAtStart,
+    btcDeltaFromAnchorAtT0,
+    btcDeltaFromAnchorAtT15,
+    btcDeltaFromAnchorAtT30,
+    btcDeltaFromAnchorAtT60,
+    btcDeltaFromAnchorAtT120,
+    btcDeltaFromAnchorAtT240,
+    btcDeltaFromAnchorAtT295,
     closeReferencePriceDerived,
     closeReferencePriceOfficial,
     dataQuality: null,
@@ -410,6 +424,12 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
   ];
   const summaries = [
     buildSummary({
+      btcDeltaFromAnchorAtT15: 15,
+      btcDeltaFromAnchorAtT30: 25,
+      btcDeltaFromAnchorAtT60: 35,
+      btcDeltaFromAnchorAtT120: 45,
+      btcDeltaFromAnchorAtT240: 55,
+      btcDeltaFromAnchorAtT295: 60,
       firstBtcWinningSideAt10UsdSecond: 0,
       firstBtcWinningSideAt20UsdSecond: 15,
       firstBtcWinningSideAt30UsdSecond: 60,
@@ -421,6 +441,12 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
       windowStartTs: 1_000,
     }),
     buildSummary({
+      btcDeltaFromAnchorAtT15: -5,
+      btcDeltaFromAnchorAtT30: -12,
+      btcDeltaFromAnchorAtT60: -22,
+      btcDeltaFromAnchorAtT120: -31,
+      btcDeltaFromAnchorAtT240: -40,
+      btcDeltaFromAnchorAtT295: -42,
       firstBtcWinningSideAt10UsdSecond: 30,
       firstBtcWinningSideAt20UsdSecond: 60,
       firstBtcWinningSideAt30UsdSecond: null,
@@ -432,6 +458,12 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
       windowStartTs: 2_000,
     }),
     buildSummary({
+      btcDeltaFromAnchorAtT15: -25,
+      btcDeltaFromAnchorAtT30: -20,
+      btcDeltaFromAnchorAtT60: -18,
+      btcDeltaFromAnchorAtT120: -10,
+      btcDeltaFromAnchorAtT240: -5,
+      btcDeltaFromAnchorAtT295: 5,
       firstBtcWinningSideAt10UsdSecond: null,
       firstBtcWinningSideAt20UsdSecond: null,
       firstBtcWinningSideAt30UsdSecond: null,
@@ -443,6 +475,12 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
       windowStartTs: 3_000,
     }),
     buildSummary({
+      btcDeltaFromAnchorAtT15: -2,
+      btcDeltaFromAnchorAtT30: -8,
+      btcDeltaFromAnchorAtT60: -12,
+      btcDeltaFromAnchorAtT120: -18,
+      btcDeltaFromAnchorAtT240: -35,
+      btcDeltaFromAnchorAtT295: -38,
       firstBtcWinningSideAt10UsdSecond: 240,
       firstBtcWinningSideAt20UsdSecond: null,
       firstBtcWinningSideAt30UsdSecond: null,
@@ -696,6 +734,82 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
       thresholdUsd: 30,
     },
   ]);
+
+  const upAt15By10 = result.btcConditionalReliabilityRows.find(
+    (row) =>
+      row.checkpoint === "t15" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.thresholdUsd === 10,
+  );
+  assert.deepEqual(upAt15By10, {
+    averageAbsDeltaUsd: 15,
+    averageDeltaUsd: 15,
+    checkpoint: "t15",
+    checkpointLabel: "T+15",
+    checkpointSecond: 15,
+    sampleCount: 1,
+    side: MARKET_OUTCOMES.UP,
+    thresholdUsd: 10,
+    winCount: 1,
+    winRate: 1,
+  });
+
+  const downAt30By10 = result.btcConditionalReliabilityRows.find(
+    (row) =>
+      row.checkpoint === "t30" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.thresholdUsd === 10,
+  );
+  assert.deepEqual(downAt30By10, {
+    averageAbsDeltaUsd: 16,
+    averageDeltaUsd: -16,
+    checkpoint: "t30",
+    checkpointLabel: "T+30",
+    checkpointSecond: 30,
+    sampleCount: 2,
+    side: MARKET_OUTCOMES.DOWN,
+    thresholdUsd: 10,
+    winCount: 1,
+    winRate: 0.5,
+  });
+
+  const downAt60By20 = result.btcConditionalReliabilityRows.find(
+    (row) =>
+      row.checkpoint === "t60" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.thresholdUsd === 20,
+  );
+  assert.deepEqual(downAt60By20, {
+    averageAbsDeltaUsd: 22,
+    averageDeltaUsd: -22,
+    checkpoint: "t60",
+    checkpointLabel: "T+60",
+    checkpointSecond: 60,
+    sampleCount: 1,
+    side: MARKET_OUTCOMES.DOWN,
+    thresholdUsd: 20,
+    winCount: 1,
+    winRate: 1,
+  });
+
+  const upAt60By30 = result.btcConditionalReliabilityRows.find(
+    (row) =>
+      row.checkpoint === "t60" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.thresholdUsd === 30,
+  );
+  assert.deepEqual(upAt60By30, {
+    averageAbsDeltaUsd: 35,
+    averageDeltaUsd: 35,
+    checkpoint: "t60",
+    checkpointLabel: "T+60",
+    checkpointSecond: 60,
+    sampleCount: 1,
+    side: MARKET_OUTCOMES.UP,
+    thresholdUsd: 30,
+    winCount: 1,
+    winRate: 1,
+  });
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {

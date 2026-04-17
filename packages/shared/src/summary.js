@@ -127,6 +127,27 @@ function getCheckpointValue(
   );
 }
 
+function getBtcDeltaFromAnchorAtCheckpoint(
+  liveSnapshots,
+  checkpointSecond,
+  anchor,
+  toleranceSeconds,
+) {
+  const normalizedAnchor = toFiniteNumber(anchor);
+  const btcPrice = getCheckpointValue(
+    liveSnapshots,
+    checkpointSecond,
+    "btcChainlink",
+    toleranceSeconds,
+  );
+
+  if (normalizedAnchor === null || btcPrice === null) {
+    return null;
+  }
+
+  return btcPrice - normalizedAnchor;
+}
+
 function getExpectedLiveBuckets(market, sampleCadenceMs) {
   return getExpectedBucketCount(
     market.windowStartTs,
@@ -517,6 +538,17 @@ export function buildMarketSummary({
       ),
     ]),
   );
+  const btcDeltaCheckpointValues = Object.fromEntries(
+    SUMMARY_CHECKPOINT_SECONDS.map((checkpointSecond) => [
+      checkpointSecond,
+      getBtcDeltaFromAnchorAtCheckpoint(
+        liveSnapshots,
+        checkpointSecond,
+        winningSideAnchor,
+        checkpointToleranceSeconds,
+      ),
+    ]),
+  );
   const stats = computeStats(liveSnapshots);
   const qualityFlags = buildQualityFlags({
     btcPathConflictsResolved,
@@ -571,18 +603,25 @@ export function buildMarketSummary({
       btcBinanceAtEnd: endReference.binancePrice,
       upDisplayedAtT0: upCheckpointValues[0],
       downDisplayedAtT0: downCheckpointValues[0],
+      btcDeltaFromAnchorAtT0: btcDeltaCheckpointValues[0],
       upDisplayedAtT15: upCheckpointValues[15],
       downDisplayedAtT15: downCheckpointValues[15],
+      btcDeltaFromAnchorAtT15: btcDeltaCheckpointValues[15],
       upDisplayedAtT30: upCheckpointValues[30],
       downDisplayedAtT30: downCheckpointValues[30],
+      btcDeltaFromAnchorAtT30: btcDeltaCheckpointValues[30],
       upDisplayedAtT60: upCheckpointValues[60],
       downDisplayedAtT60: downCheckpointValues[60],
+      btcDeltaFromAnchorAtT60: btcDeltaCheckpointValues[60],
       upDisplayedAtT120: upCheckpointValues[120],
       downDisplayedAtT120: downCheckpointValues[120],
+      btcDeltaFromAnchorAtT120: btcDeltaCheckpointValues[120],
       upDisplayedAtT240: upCheckpointValues[240],
       downDisplayedAtT240: downCheckpointValues[240],
+      btcDeltaFromAnchorAtT240: btcDeltaCheckpointValues[240],
       upDisplayedAtT295: upCheckpointValues[295],
       downDisplayedAtT295: downCheckpointValues[295],
+      btcDeltaFromAnchorAtT295: btcDeltaCheckpointValues[295],
       upMax: stats.upMax,
       upMin: stats.upMin,
       upRange: stats.upRange,

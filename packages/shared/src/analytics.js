@@ -2,36 +2,42 @@ import { DATA_QUALITY, MARKET_OUTCOMES } from "./market.js";
 
 export const ANALYTICS_CHECKPOINTS = [
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT15",
     downField: "downDisplayedAtT15",
     id: "t15",
     label: "T+15",
     upField: "upDisplayedAtT15",
   },
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT30",
     downField: "downDisplayedAtT30",
     id: "t30",
     label: "T+30",
     upField: "upDisplayedAtT30",
   },
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT60",
     downField: "downDisplayedAtT60",
     id: "t60",
     label: "T+60",
     upField: "upDisplayedAtT60",
   },
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT120",
     downField: "downDisplayedAtT120",
     id: "t120",
     label: "T+120",
     upField: "upDisplayedAtT120",
   },
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT240",
     downField: "downDisplayedAtT240",
     id: "t240",
     label: "T+240",
     upField: "upDisplayedAtT240",
   },
   {
+    btcDeltaField: "btcDeltaFromAnchorAtT295",
     downField: "downDisplayedAtT295",
     id: "t295",
     label: "T+295",
@@ -335,6 +341,10 @@ function getSideProbability(summary, checkpoint, side) {
   const values = getCheckpointValue(summary, checkpoint);
 
   return side === MARKET_OUTCOMES.UP ? values.up : values.down;
+}
+
+function getBtcDeltaValue(summary, checkpoint) {
+  return toFiniteNumber(summary[checkpoint.btcDeltaField]);
 }
 
 function getCalibrationBucket(probability) {
@@ -763,6 +773,93 @@ function buildBtcWinningSideDistanceStats(rows, minSampleSize) {
   });
 }
 
+function buildBtcConditionalReliabilityRows(rows, minSampleSize) {
+  const aggregates = new Map();
+
+  for (const row of rows) {
+    for (const checkpoint of ANALYTICS_CHECKPOINTS) {
+      const btcDeltaUsd = getBtcDeltaValue(row.summary, checkpoint);
+
+      if (btcDeltaUsd === null) {
+        continue;
+      }
+
+      for (const threshold of BTC_WINNING_SIDE_DISTANCE_THRESHOLDS) {
+        for (const side of SIDE_ORDER) {
+          const matchesThreshold =
+            side === MARKET_OUTCOMES.UP
+              ? btcDeltaUsd >= threshold.thresholdUsd
+              : btcDeltaUsd <= -threshold.thresholdUsd;
+
+          if (!matchesThreshold) {
+            continue;
+          }
+
+          const key = `${checkpoint.id}:${side}:${threshold.thresholdUsd}`;
+          const aggregate = aggregates.get(key) ?? {
+            averageAbsDeltaTotal: 0,
+            averageDeltaTotal: 0,
+            checkpoint: checkpoint.id,
+            checkpointLabel: checkpoint.label,
+            checkpointSecond: Number(checkpoint.id.replace("t", "")),
+            sampleCount: 0,
+            side,
+            thresholdUsd: threshold.thresholdUsd,
+            winCount: 0,
+          };
+
+          aggregate.averageAbsDeltaTotal += Math.abs(btcDeltaUsd);
+          aggregate.averageDeltaTotal += btcDeltaUsd;
+          aggregate.sampleCount += 1;
+          aggregate.winCount += row.summary.resolvedOutcome === side ? 1 : 0;
+          aggregates.set(key, aggregate);
+        }
+      }
+    }
+  }
+
+  return [...aggregates.values()]
+    .filter((aggregate) => aggregate.sampleCount >= minSampleSize)
+    .map((aggregate) => ({
+      averageAbsDeltaUsd:
+        aggregate.sampleCount > 0
+          ? aggregate.averageAbsDeltaTotal / aggregate.sampleCount
+          : null,
+      averageDeltaUsd:
+        aggregate.sampleCount > 0
+          ? aggregate.averageDeltaTotal / aggregate.sampleCount
+          : null,
+      checkpoint: aggregate.checkpoint,
+      checkpointLabel: aggregate.checkpointLabel,
+      checkpointSecond: aggregate.checkpointSecond,
+      sampleCount: aggregate.sampleCount,
+      side: aggregate.side,
+      thresholdUsd: aggregate.thresholdUsd,
+      winCount: aggregate.winCount,
+      winRate:
+        aggregate.sampleCount > 0
+          ? aggregate.winCount / aggregate.sampleCount
+          : null,
+    }))
+    .sort((a, b) => {
+      const checkpointDelta =
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === a.checkpoint) -
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === b.checkpoint);
+
+      if (checkpointDelta !== 0) {
+        return checkpointDelta;
+      }
+
+      const thresholdDelta = a.thresholdUsd - b.thresholdUsd;
+
+      if (thresholdDelta !== 0) {
+        return thresholdDelta;
+      }
+
+      return SIDE_ORDER.indexOf(a.side) - SIDE_ORDER.indexOf(b.side);
+    });
+}
+
 function buildBtcWinningSideHeadline(rows) {
   const checkpoint = BTC_WINNING_SIDE_CHECKPOINTS.find(
     (item) => item.second === BTC_WINNING_SIDE_HEADLINE_SECOND,
@@ -1022,6 +1119,7 @@ export function buildAnalyticsReport({
     boundaryMoveOverview: buildBoundaryMoveOverview(rows),
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
+    btcConditionalReliabilityRows: buildBtcConditionalReliabilityRows(rows, minSampleSize),
     btcWinningSideCheckpointStats: buildBtcWinningSideCheckpointStats(rows, minSampleSize),
     btcWinningSideDistanceStats: buildBtcWinningSideDistanceStats(rows, minSampleSize),
     btcWinningSideHeadline: buildBtcWinningSideHeadline(rows),

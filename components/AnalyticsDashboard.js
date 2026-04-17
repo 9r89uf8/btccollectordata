@@ -202,7 +202,9 @@ function formatBtcWinningSideHeadline(headline) {
     return "No finalized markets match the current filters for BTC first-winning-side timing yet.";
   }
 
-  return `${formatProbability(headline.share)} of filtered markets first reached the eventual winning side by ${headline.checkpointLabel}.`;
+  return `${formatProbability(headline.share)} of filtered markets first reached the eventual winning side by ${formatCheckpointLabel(
+    headline.checkpointSecond,
+  )}.`;
 }
 
 function formatCadenceMix(rows) {
@@ -381,6 +383,7 @@ export default function AnalyticsDashboard() {
     boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
     boundaryMoveThresholdStats = [],
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideDistanceStats = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideHeadline = EMPTY_BTC_WINNING_SIDE_HEADLINE,
@@ -910,6 +913,52 @@ export default function AnalyticsDashboard() {
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Conditional outcome reliability
+              </p>
+              <p className="max-w-3xl text-sm leading-7 text-stone-700">
+                This asks the predictive question directly: at a given checkpoint,
+                if BTC is above or below the anchor by at least a threshold amount,
+                how often does that side actually win?
+              </p>
+              {btcConditionalReliabilityRows.length === 0 ? (
+                <EmptyTable message="No BTC conditional reliability rows meet the current support floor." />
+              ) : (
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Checkpoint</th>
+                        <th className="px-4 py-3 font-semibold">BTC side</th>
+                        <th className="px-4 py-3 font-semibold">Threshold</th>
+                        <th className="px-4 py-3 font-semibold">Samples</th>
+                        <th className="px-4 py-3 font-semibold">Avg BTC delta</th>
+                        <th className="px-4 py-3 font-semibold">Win rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {btcConditionalReliabilityRows.map((row) => (
+                        <tr
+                          key={`${row.checkpoint}-${row.side}-${row.thresholdUsd}`}
+                          className="border-t border-stone-200/80 bg-white"
+                        >
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {formatCheckpointLabel(row.checkpointSecond)}
+                          </td>
+                          <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
+                          <td className="px-4 py-3">{formatBtcUsd(row.thresholdUsd)}</td>
+                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                          <td className="px-4 py-3">{formatBtcUsd(row.averageDeltaUsd)}</td>
+                          <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

@@ -90,6 +90,7 @@ test("buildMarketSummary uses nearest checkpoint snapshots within one second", (
   const result = buildMarketSummary({ market, nowTs: 25_000, snapshots });
 
   assert.equal(result.summary.upDisplayedAtT15, 0.62);
+  assert.ok(Math.abs(result.summary.btcDeltaFromAnchorAtT15 - 0.1) < 1e-9);
 });
 
 test("buildMarketSummary treats complete five-second sampling as complete data, not gaps", () => {
