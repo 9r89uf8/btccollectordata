@@ -192,6 +192,28 @@ const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS = [
     thresholdUsd: 30,
   },
 ];
+const BTC_CONDITIONAL_RELIABILITY_BUCKETS = [
+  {
+    label: "$10-$19.99",
+    maxUsd: 20,
+    minUsd: 10,
+  },
+  {
+    label: "$20-$29.99",
+    maxUsd: 30,
+    minUsd: 20,
+  },
+  {
+    label: "$30-$49.99",
+    maxUsd: 50,
+    minUsd: 30,
+  },
+  {
+    label: "$50+",
+    maxUsd: null,
+    minUsd: 50,
+  },
+];
 const ET_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   hourCycle: "h23",
@@ -860,6 +882,98 @@ function buildBtcConditionalReliabilityRows(rows, minSampleSize) {
     });
 }
 
+function buildBtcConditionalReliabilityBucketRows(rows, minSampleSize) {
+  const aggregates = new Map();
+
+  for (const row of rows) {
+    for (const checkpoint of ANALYTICS_CHECKPOINTS) {
+      const btcDeltaUsd = getBtcDeltaValue(row.summary, checkpoint);
+
+      if (btcDeltaUsd === null) {
+        continue;
+      }
+
+      for (const bucket of BTC_CONDITIONAL_RELIABILITY_BUCKETS) {
+        const absDeltaUsd = Math.abs(btcDeltaUsd);
+
+        if (absDeltaUsd < bucket.minUsd) {
+          continue;
+        }
+
+        if (bucket.maxUsd !== null && absDeltaUsd >= bucket.maxUsd) {
+          continue;
+        }
+
+        const side =
+          btcDeltaUsd >= 0 ? MARKET_OUTCOMES.UP : MARKET_OUTCOMES.DOWN;
+        const key = `${checkpoint.id}:${side}:${bucket.minUsd}`;
+        const aggregate = aggregates.get(key) ?? {
+          averageAbsDeltaTotal: 0,
+          averageDeltaTotal: 0,
+          bucketLabel: bucket.label,
+          checkpoint: checkpoint.id,
+          checkpointLabel: checkpoint.label,
+          checkpointSecond: Number(checkpoint.id.replace("t", "")),
+          maxUsd: bucket.maxUsd,
+          minUsd: bucket.minUsd,
+          sampleCount: 0,
+          side,
+          winCount: 0,
+        };
+
+        aggregate.averageAbsDeltaTotal += absDeltaUsd;
+        aggregate.averageDeltaTotal += btcDeltaUsd;
+        aggregate.sampleCount += 1;
+        aggregate.winCount += row.summary.resolvedOutcome === side ? 1 : 0;
+        aggregates.set(key, aggregate);
+      }
+    }
+  }
+
+  return [...aggregates.values()]
+    .filter((aggregate) => aggregate.sampleCount >= minSampleSize)
+    .map((aggregate) => ({
+      averageAbsDeltaUsd:
+        aggregate.sampleCount > 0
+          ? aggregate.averageAbsDeltaTotal / aggregate.sampleCount
+          : null,
+      averageDeltaUsd:
+        aggregate.sampleCount > 0
+          ? aggregate.averageDeltaTotal / aggregate.sampleCount
+          : null,
+      bucketLabel: aggregate.bucketLabel,
+      checkpoint: aggregate.checkpoint,
+      checkpointLabel: aggregate.checkpointLabel,
+      checkpointSecond: aggregate.checkpointSecond,
+      maxUsd: aggregate.maxUsd,
+      minUsd: aggregate.minUsd,
+      sampleCount: aggregate.sampleCount,
+      side: aggregate.side,
+      winCount: aggregate.winCount,
+      winRate:
+        aggregate.sampleCount > 0
+          ? aggregate.winCount / aggregate.sampleCount
+          : null,
+    }))
+    .sort((a, b) => {
+      const checkpointDelta =
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === a.checkpoint) -
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === b.checkpoint);
+
+      if (checkpointDelta !== 0) {
+        return checkpointDelta;
+      }
+
+      const sideDelta = SIDE_ORDER.indexOf(a.side) - SIDE_ORDER.indexOf(b.side);
+
+      if (sideDelta !== 0) {
+        return sideDelta;
+      }
+
+      return a.minUsd - b.minUsd;
+    });
+}
+
 function buildBtcWinningSideHeadline(rows) {
   const checkpoint = BTC_WINNING_SIDE_CHECKPOINTS.find(
     (item) => item.second === BTC_WINNING_SIDE_HEADLINE_SECOND,
@@ -1119,6 +1233,10 @@ export function buildAnalyticsReport({
     boundaryMoveOverview: buildBoundaryMoveOverview(rows),
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
+    btcConditionalReliabilityBucketRows: buildBtcConditionalReliabilityBucketRows(
+      rows,
+      minSampleSize,
+    ),
     btcConditionalReliabilityRows: buildBtcConditionalReliabilityRows(rows, minSampleSize),
     btcWinningSideCheckpointStats: buildBtcWinningSideCheckpointStats(rows, minSampleSize),
     btcWinningSideDistanceStats: buildBtcWinningSideDistanceStats(rows, minSampleSize),

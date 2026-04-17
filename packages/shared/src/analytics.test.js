@@ -810,6 +810,90 @@ test("buildAnalyticsReport summarizes BTC first-winning-side timing and cadence 
     winCount: 1,
     winRate: 1,
   });
+
+  const upBucketAt15 = result.btcConditionalReliabilityBucketRows.find(
+    (row) =>
+      row.checkpoint === "t15" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.bucketLabel === "$10-$19.99",
+  );
+  assert.deepEqual(upBucketAt15, {
+    averageAbsDeltaUsd: 15,
+    averageDeltaUsd: 15,
+    bucketLabel: "$10-$19.99",
+    checkpoint: "t15",
+    checkpointLabel: "T+15",
+    checkpointSecond: 15,
+    maxUsd: 20,
+    minUsd: 10,
+    sampleCount: 1,
+    side: MARKET_OUTCOMES.UP,
+    winCount: 1,
+    winRate: 1,
+  });
+
+  const downBucketAt60 = result.btcConditionalReliabilityBucketRows.find(
+    (row) =>
+      row.checkpoint === "t60" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.bucketLabel === "$10-$19.99",
+  );
+  assert.deepEqual(downBucketAt60, {
+    averageAbsDeltaUsd: 15,
+    averageDeltaUsd: -15,
+    bucketLabel: "$10-$19.99",
+    checkpoint: "t60",
+    checkpointLabel: "T+60",
+    checkpointSecond: 60,
+    maxUsd: 20,
+    minUsd: 10,
+    sampleCount: 2,
+    side: MARKET_OUTCOMES.DOWN,
+    winCount: 1,
+    winRate: 0.5,
+  });
+
+  const downBucketAt240 = result.btcConditionalReliabilityBucketRows.find(
+    (row) =>
+      row.checkpoint === "t240" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.bucketLabel === "$30-$49.99",
+  );
+  assert.deepEqual(downBucketAt240, {
+    averageAbsDeltaUsd: 37.5,
+    averageDeltaUsd: -37.5,
+    bucketLabel: "$30-$49.99",
+    checkpoint: "t240",
+    checkpointLabel: "T+240",
+    checkpointSecond: 240,
+    maxUsd: 50,
+    minUsd: 30,
+    sampleCount: 2,
+    side: MARKET_OUTCOMES.DOWN,
+    winCount: 2,
+    winRate: 1,
+  });
+
+  const upBucketAt240 = result.btcConditionalReliabilityBucketRows.find(
+    (row) =>
+      row.checkpoint === "t240" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.bucketLabel === "$50+",
+  );
+  assert.deepEqual(upBucketAt240, {
+    averageAbsDeltaUsd: 55,
+    averageDeltaUsd: 55,
+    bucketLabel: "$50+",
+    checkpoint: "t240",
+    checkpointLabel: "T+240",
+    checkpointSecond: 240,
+    maxUsd: null,
+    minUsd: 50,
+    sampleCount: 1,
+    side: MARKET_OUTCOMES.UP,
+    winCount: 1,
+    winRate: 1,
+  });
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {
