@@ -16,6 +16,7 @@ function buildSummary({
   btcChainlinkAtStart = null,
   closeReferencePriceDerived = null,
   closeReferencePriceOfficial = null,
+  firstBtcSecureSecond = null,
   d15 = null,
   d30 = null,
   d60 = null,
@@ -27,6 +28,7 @@ function buildSummary({
   firstTimeAbove80 = null,
   priceToBeatDerived = null,
   priceToBeatOfficial = null,
+  qualityFlags = ["sample_cadence_ms:1000"],
   resolvedOutcome,
   slug,
   t15 = null,
@@ -51,6 +53,7 @@ function buildSummary({
     downDisplayedAtT240: d240,
     downDisplayedAtT295: d295,
     finalizedAt: windowStartTs + 301_000,
+    firstBtcSecureSecond,
     firstTimeAbove60,
     firstTimeAbove70,
     firstTimeAbove80,
@@ -58,7 +61,7 @@ function buildSummary({
     marketSlug: slug,
     priceToBeatDerived,
     priceToBeatOfficial,
-    qualityFlags: [],
+    qualityFlags,
     resolvedOutcome,
     upDisplayedAtT0: null,
     upDisplayedAtT15: t15,
@@ -390,6 +393,137 @@ test("buildAnalyticsReport groups BTC boundary moves by ET hour and session", ()
   );
   assert.equal(evening.sampleCount, 1);
   assert.equal(evening.maxAbsMoveUsd, 90);
+});
+
+test("buildAnalyticsReport summarizes BTC secure timing, flags, and cadence mix", () => {
+  const markets = [
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m1" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m2" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m3" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m4" }),
+  ];
+  const summaries = [
+    buildSummary({
+      firstBtcSecureSecond: 0,
+      priceToBeatOfficial: 74_000,
+      qualityFlags: ["sample_cadence_ms:1000"],
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m1",
+      windowStartTs: 1_000,
+    }),
+    buildSummary({
+      firstBtcSecureSecond: 60,
+      priceToBeatOfficial: 74_000,
+      qualityFlags: ["sample_cadence_ms:5000", "btc_secure_sparse_tail"],
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m2",
+      windowStartTs: 2_000,
+    }),
+    buildSummary({
+      firstBtcSecureSecond: null,
+      priceToBeatOfficial: 74_000,
+      qualityFlags: ["sample_cadence_ms:5000", "btc_path_conflicts_resolved"],
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m3",
+      windowStartTs: 3_000,
+    }),
+    buildSummary({
+      firstBtcSecureSecond: 240,
+      priceToBeatOfficial: 74_000,
+      qualityFlags: ["sample_cadence_ms:5000", "btc_secure_end_off_anchor_side"],
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m4",
+      windowStartTs: 4_000,
+    }),
+  ];
+
+  const result = buildAnalyticsReport({
+    filters: {
+      dateRange: "all",
+      minSampleSize: 1,
+      quality: "all",
+    },
+    markets,
+    nowTs: 10_000,
+    summaries,
+  });
+
+  assert.deepEqual(result.btcLockHeadline, {
+    checkpointLabel: "T+120",
+    checkpointSecond: 120,
+    lockedCount: 2,
+    sampleCount: 4,
+    share: 0.5,
+  });
+  assert.deepEqual(result.btcLockOverview, {
+    anchorMismatchCount: 1,
+    conflictCount: 1,
+    lockedCount: 3,
+    medianSecureSecond: 60,
+    missingAnchorCount: 0,
+    noBtcDataCount: 0,
+    p25SecureSecond: 0,
+    p75SecureSecond: 240,
+    sampleCount: 4,
+    sparseTailCount: 1,
+    unsecuredCount: 1,
+  });
+
+  assert.deepEqual(result.btcLockCadenceMix, [
+    {
+      label: "1s",
+      sampleCadenceMs: 1000,
+      sampleCount: 1,
+      share: 0.25,
+    },
+    {
+      label: "5s",
+      sampleCadenceMs: 5000,
+      sampleCount: 3,
+      share: 0.75,
+    },
+  ]);
+
+  const by15 = result.btcLockCheckpointStats.find(
+    (row) => row.checkpointSecond === 15,
+  );
+  assert.deepEqual(by15, {
+    checkpointLabel: "T+15",
+    checkpointSecond: 15,
+    lockedCount: 1,
+    sampleCount: 4,
+    share: 0.25,
+  });
+
+  const by240 = result.btcLockCheckpointStats.find(
+    (row) => row.checkpointSecond === 240,
+  );
+  assert.deepEqual(by240, {
+    checkpointLabel: "T+240",
+    checkpointSecond: 240,
+    lockedCount: 3,
+    sampleCount: 4,
+    share: 0.75,
+  });
+
+  assert.deepEqual(result.btcLockOutcomeSplit, [
+    {
+      lockedCount: 1,
+      medianSecureSecond: 0,
+      p75SecureSecond: 0,
+      sampleCount: 2,
+      share: 0.5,
+      side: MARKET_OUTCOMES.UP,
+    },
+    {
+      lockedCount: 2,
+      medianSecureSecond: 60,
+      p75SecureSecond: 240,
+      sampleCount: 2,
+      share: 1,
+      side: MARKET_OUTCOMES.DOWN,
+    },
+  ]);
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {

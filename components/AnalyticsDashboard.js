@@ -165,6 +165,32 @@ function formatDateSpan(minTs, maxTs) {
   return `${formatEtDateTime(minTs)} to ${formatEtDateTime(maxTs)}`;
 }
 
+function formatRelativeSecond(value) {
+  if (value === null || value === undefined) {
+    return "Never";
+  }
+
+  return `T+${formatCount(value)}s`;
+}
+
+function formatBtcLockHeadline(headline) {
+  if (!headline || headline.sampleCount === 0) {
+    return "No finalized markets match the current filters for BTC-path lock timing yet.";
+  }
+
+  return `${formatProbability(headline.share)} of filtered markets were BTC-secured by ${headline.checkpointLabel}.`;
+}
+
+function formatCadenceMix(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return "Cadence mix unavailable.";
+  }
+
+  return rows
+    .map((row) => `${row.label}: ${formatProbability(row.share)}`)
+    .join(" · ");
+}
+
 function FilterSelect({ onChange, options, value }) {
   return (
     <select
@@ -252,6 +278,28 @@ const EMPTY_BOUNDARY_MOVE_OVERVIEW = {
 
 const EMPTY_BOUNDARY_MOVE_ROWS = [];
 
+const EMPTY_BTC_LOCK_OVERVIEW = {
+  anchorMismatchCount: 0,
+  conflictCount: 0,
+  lockedCount: 0,
+  medianSecureSecond: null,
+  missingAnchorCount: 0,
+  noBtcDataCount: 0,
+  p25SecureSecond: null,
+  p75SecureSecond: null,
+  sampleCount: 0,
+  sparseTailCount: 0,
+  unsecuredCount: 0,
+};
+
+const EMPTY_BTC_LOCK_HEADLINE = {
+  checkpointLabel: "T+120",
+  checkpointSecond: 120,
+  lockedCount: 0,
+  sampleCount: 0,
+  share: null,
+};
+
 const EMPTY_OVERVIEW = {
   downWins: 0,
   gapCount: 0,
@@ -310,6 +358,11 @@ export default function AnalyticsDashboard() {
     boundaryMoveHeadline = null,
     boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
     boundaryMoveThresholdStats = [],
+    btcLockCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcLockCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcLockHeadline = EMPTY_BTC_LOCK_HEADLINE,
+    btcLockOutcomeSplit = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcLockOverview = EMPTY_BTC_LOCK_OVERVIEW,
     appliedFilters = EMPTY_APPLIED_FILTERS,
     calibrationRows = [],
     crossingDistributions = [],
@@ -624,6 +677,156 @@ export default function AnalyticsDashboard() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="BTC-path lock timing"
+        title="When the eventual BTC winner becomes secured"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          A market is treated as BTC-secured once BTC is on the eventual winning
+          side of the anchor and never crosses back on any later observed live
+          bucket. Mixed snapshot cadence changes what "earliest observable lock"
+          means, so keep the cadence mix in mind when comparing date ranges.
+        </p>
+        <p className="mb-5 text-sm leading-7 text-stone-600">
+          Cadence mix: {formatCadenceMix(btcLockCadenceMix)}
+        </p>
+
+        {btcLockOverview.sampleCount === 0 ? (
+          <EmptyTable message="No finalized markets currently match the filters for BTC-path lock timing." />
+        ) : (
+          <div className="space-y-6">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
+              <MetricPanel
+                label="Locked by T+120"
+                value={
+                  btcLockHeadline.sampleCount > 0
+                    ? formatProbability(btcLockHeadline.share)
+                    : "No sample"
+                }
+                detail={formatBtcLockHeadline(btcLockHeadline)}
+              />
+              <MetricPanel
+                label="Locked sample"
+                value={`${formatCount(btcLockOverview.lockedCount)} / ${formatCount(btcLockOverview.sampleCount)}`}
+                detail="Markets with a non-null first BTC secure second inside the filtered summary set."
+              />
+              <MetricPanel
+                label="Median lock time"
+                value={formatRelativeSecond(btcLockOverview.medianSecureSecond)}
+                detail="Median earliest observed secure second across locked markets."
+              />
+              <MetricPanel
+                label="P25 lock time"
+                value={formatRelativeSecond(btcLockOverview.p25SecureSecond)}
+                detail="25th-percentile secure timing across locked markets."
+              />
+              <MetricPanel
+                label="P75 lock time"
+                value={formatRelativeSecond(btcLockOverview.p75SecureSecond)}
+                detail="75th-percentile secure timing across locked markets."
+              />
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+              <div className="space-y-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                  Secured by checkpoint
+                </p>
+                {btcLockCheckpointStats.length === 0 ? (
+                  <EmptyTable message="No BTC lock checkpoint rows meet the current support floor." />
+                ) : (
+                  <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                    <table className="min-w-full text-left text-sm text-stone-700">
+                      <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Checkpoint</th>
+                          <th className="px-4 py-3 font-semibold">Markets</th>
+                          <th className="px-4 py-3 font-semibold">Secured by then</th>
+                          <th className="px-4 py-3 font-semibold">Share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {btcLockCheckpointStats.map((row) => (
+                          <tr
+                            key={row.checkpointSecond}
+                            className="border-t border-stone-200/80 bg-white"
+                          >
+                            <td className="px-4 py-3 font-medium text-stone-950">
+                              {row.checkpointLabel}
+                            </td>
+                            <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                            <td className="px-4 py-3">{formatCount(row.lockedCount)}</td>
+                            <td className="px-4 py-3">{formatProbability(row.share)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                  Outcome split
+                </p>
+                {btcLockOutcomeSplit.length === 0 ? (
+                  <EmptyTable message="No Up/Down BTC lock rows meet the current support floor." />
+                ) : (
+                  <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                    <table className="min-w-full text-left text-sm text-stone-700">
+                      <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Outcome</th>
+                          <th className="px-4 py-3 font-semibold">Markets</th>
+                          <th className="px-4 py-3 font-semibold">Locked</th>
+                          <th className="px-4 py-3 font-semibold">Share</th>
+                          <th className="px-4 py-3 font-semibold">Median lock</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {btcLockOutcomeSplit.map((row) => (
+                          <tr key={row.side} className="border-t border-stone-200/80 bg-white">
+                            <td className="px-4 py-3 font-medium text-stone-950">
+                              {formatSideLabel(row.side)}
+                            </td>
+                            <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                            <td className="px-4 py-3">{formatCount(row.lockedCount)}</td>
+                            <td className="px-4 py-3">{formatProbability(row.share)}</td>
+                            <td className="px-4 py-3">
+                              {formatRelativeSecond(row.medianSecureSecond)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="rounded-[1.2rem] border border-black/10 bg-stone-50 px-5 py-4 text-sm leading-7 text-stone-700">
+                  <p>
+                    Conflicts: {formatCount(btcLockOverview.conflictCount)} BTC-path
+                    vs resolved-outcome disagreements.
+                  </p>
+                  <p>
+                    Anchor mismatches: {formatCount(btcLockOverview.anchorMismatchCount)} rows
+                    where the official anchor side disagrees with the derived start/end path.
+                  </p>
+                  <p>
+                    Sparse tails: {formatCount(btcLockOverview.sparseTailCount)} rows with
+                    thin BTC coverage after the secure point.
+                  </p>
+                  <p>
+                    Missing anchor / no BTC data: {formatCount(btcLockOverview.missingAnchorCount)} /
+                    {" "}
+                    {formatCount(btcLockOverview.noBtcDataCount)}.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -163,6 +163,15 @@ const BOUNDARY_MOVE_BUCKETS = [
   { minUsd: 75, maxUsd: 100, label: "$75-$99.99" },
   { minUsd: 100, maxUsd: null, label: "$100+" },
 ];
+const BTC_LOCK_CHECKPOINTS = [
+  { label: "T+15", second: 15 },
+  { label: "T+30", second: 30 },
+  { label: "T+60", second: 60 },
+  { label: "T+120", second: 120 },
+  { label: "T+240", second: 240 },
+  { label: "T+295", second: 295 },
+];
+const BTC_LOCK_HEADLINE_SECOND = 120;
 const ET_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   hourCycle: "h23",
@@ -216,6 +225,26 @@ function getDateRangeStart(dateRange, nowTs) {
 
 function getSummaryQuality(summary, marketsBySlug) {
   return summary.dataQuality ?? marketsBySlug.get(summary.marketSlug)?.dataQuality ?? "unknown";
+}
+
+function getSummaryQualityFlags(summary) {
+  return Array.isArray(summary.qualityFlags) ? summary.qualityFlags : [];
+}
+
+function hasQualityFlag(summary, target) {
+  return getSummaryQualityFlags(summary).includes(target);
+}
+
+function getNumericQualityFlagValue(summary, prefix) {
+  const flag = getSummaryQualityFlags(summary).find((item) =>
+    item.startsWith(`${prefix}:`),
+  );
+
+  if (!flag) {
+    return null;
+  }
+
+  return toFiniteNumber(flag.slice(prefix.length + 1));
 }
 
 function getBoundaryReferencePrice(summary, fields) {
@@ -342,7 +371,10 @@ function buildFilteredRows({ summaries, markets, filters, nowTs }) {
     summaries
       .map((summary) => ({
         boundaryMove: getBoundaryMove(summary),
+        btcSecureSecond: toFiniteNumber(summary.firstBtcSecureSecond),
         quality: getSummaryQuality(summary, marketsBySlug),
+        qualityFlags: getSummaryQualityFlags(summary),
+        sampleCadenceMs: getNumericQualityFlagValue(summary, "sample_cadence_ms"),
         summary,
       }))
       .filter((row) => {
@@ -568,6 +600,124 @@ function buildBoundaryMoveBySession(rows, minSampleSize) {
       ...buildBoundaryMoveAggregate(bucketRows),
     };
   }).filter((row) => row.sampleCount >= minSampleSize);
+}
+
+function getLockedRows(rows) {
+  return rows.filter((row) => row.btcSecureSecond !== null);
+}
+
+function countRowsWithFlag(rows, target) {
+  return rows.filter((row) => row.qualityFlags.includes(target)).length;
+}
+
+function buildBtcLockOverview(rows) {
+  const lockedRows = getLockedRows(rows);
+  const lockedSeconds = lockedRows
+    .map((row) => row.btcSecureSecond)
+    .sort((a, b) => a - b);
+
+  return {
+    anchorMismatchCount: countRowsWithFlag(rows, "btc_secure_end_off_anchor_side"),
+    conflictCount: countRowsWithFlag(rows, "btc_path_conflicts_resolved"),
+    lockedCount: lockedRows.length,
+    medianSecureSecond: getPercentile(lockedSeconds, 0.5),
+    missingAnchorCount: countRowsWithFlag(rows, "btc_secure_missing_anchor"),
+    noBtcDataCount: countRowsWithFlag(rows, "btc_secure_no_btc_data"),
+    p25SecureSecond: getPercentile(lockedSeconds, 0.25),
+    p75SecureSecond: getPercentile(lockedSeconds, 0.75),
+    sampleCount: rows.length,
+    sparseTailCount: countRowsWithFlag(rows, "btc_secure_sparse_tail"),
+    unsecuredCount: rows.length - lockedRows.length,
+  };
+}
+
+function buildBtcLockCheckpointStats(rows, minSampleSize) {
+  if (rows.length < minSampleSize) {
+    return [];
+  }
+
+  return BTC_LOCK_CHECKPOINTS.map((checkpoint) => {
+    const lockedCount = rows.filter(
+      (row) =>
+        row.btcSecureSecond !== null &&
+        row.btcSecureSecond <= checkpoint.second,
+    ).length;
+
+    return {
+      checkpointLabel: checkpoint.label,
+      checkpointSecond: checkpoint.second,
+      lockedCount,
+      sampleCount: rows.length,
+      share: rows.length > 0 ? lockedCount / rows.length : null,
+    };
+  });
+}
+
+function buildBtcLockOutcomeSplit(rows, minSampleSize) {
+  return SIDE_ORDER.map((side) => {
+    const sideRows = rows.filter((row) => row.summary.resolvedOutcome === side);
+    const lockedRows = getLockedRows(sideRows);
+    const lockedSeconds = lockedRows
+      .map((row) => row.btcSecureSecond)
+      .sort((a, b) => a - b);
+
+    return {
+      lockedCount: lockedRows.length,
+      medianSecureSecond: getPercentile(lockedSeconds, 0.5),
+      p75SecureSecond: getPercentile(lockedSeconds, 0.75),
+      sampleCount: sideRows.length,
+      share: sideRows.length > 0 ? lockedRows.length / sideRows.length : null,
+      side,
+    };
+  }).filter((row) => row.sampleCount >= minSampleSize);
+}
+
+function buildBtcLockCadenceMix(rows) {
+  const cadenceCounts = new Map();
+
+  for (const row of rows) {
+    const key = row.sampleCadenceMs ?? "unknown";
+    cadenceCounts.set(key, (cadenceCounts.get(key) ?? 0) + 1);
+  }
+
+  return [...cadenceCounts.entries()]
+    .map(([sampleCadenceMs, sampleCount]) => ({
+      label:
+        sampleCadenceMs === "unknown" ? "unknown" : `${sampleCadenceMs / 1000}s`,
+      sampleCadenceMs,
+      sampleCount,
+      share: rows.length > 0 ? sampleCount / rows.length : null,
+    }))
+    .sort((a, b) => {
+      if (a.sampleCadenceMs === "unknown") {
+        return 1;
+      }
+
+      if (b.sampleCadenceMs === "unknown") {
+        return -1;
+      }
+
+      return a.sampleCadenceMs - b.sampleCadenceMs;
+    });
+}
+
+function buildBtcLockHeadline(rows) {
+  const checkpoint = BTC_LOCK_CHECKPOINTS.find(
+    (item) => item.second === BTC_LOCK_HEADLINE_SECOND,
+  );
+  const lockedCount = rows.filter(
+    (row) =>
+      row.btcSecureSecond !== null &&
+      row.btcSecureSecond <= BTC_LOCK_HEADLINE_SECOND,
+  ).length;
+
+  return {
+    checkpointLabel: checkpoint.label,
+    checkpointSecond: checkpoint.second,
+    lockedCount,
+    sampleCount: rows.length,
+    share: rows.length > 0 ? lockedCount / rows.length : null,
+  };
 }
 
 function buildThresholdStats(rows, minSampleSize) {
@@ -809,6 +959,11 @@ export function buildAnalyticsReport({
     boundaryMoveHeadline: buildBoundaryMoveHeadline(rows),
     boundaryMoveOverview: buildBoundaryMoveOverview(rows),
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
+    btcLockCadenceMix: buildBtcLockCadenceMix(rows),
+    btcLockCheckpointStats: buildBtcLockCheckpointStats(rows, minSampleSize),
+    btcLockHeadline: buildBtcLockHeadline(rows),
+    btcLockOutcomeSplit: buildBtcLockOutcomeSplit(rows, minSampleSize),
+    btcLockOverview: buildBtcLockOverview(rows),
     calibrationRows: buildCalibrationRows(rows, minSampleSize),
     crossingDistributions: buildCrossingDistributions(rows),
     headlineFinding: buildHeadlineFinding(rows),

@@ -63,6 +63,7 @@ test("buildMarketSummary computes checkpoint stats and good quality from complet
   assert.equal(result.summary.firstTimeAbove60, 2);
   assert.equal(result.summary.firstTimeAbove70, 3);
   assert.equal(result.summary.firstTimeAbove80, null);
+  assert.equal(result.summary.firstBtcSecureSecond, 0);
   assert.deepEqual(result.qualityFlags, ["sample_cadence_ms:1000"]);
 });
 
@@ -196,4 +197,149 @@ test("buildMarketSummary falls back to derived outcome and marks gap data correc
   assert.ok(result.qualityFlags.includes("sample_cadence_ms:2000"));
   assert.ok(result.qualityFlags.includes("missing_live_buckets:1"));
   assert.ok(result.qualityFlags.includes("stale_book_buckets:1"));
+});
+
+test("buildMarketSummary re-locks after the last BTC violation", () => {
+  const market = {
+    closeReferencePriceOfficial: 101,
+    marketId: "test-market",
+    priceToBeatOfficial: 100,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 300_000,
+    windowStartTs: 0,
+    winningOutcome: MARKET_OUTCOMES.UP,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: 99.8, phase: "live", second: 0, upDisplayed: 0.4 }),
+    buildSnapshot({ btcChainlink: 100.2, phase: "live", second: 30, upDisplayed: 0.56 }),
+    buildSnapshot({ btcChainlink: 100.6, phase: "live", second: 60, upDisplayed: 0.64 }),
+    buildSnapshot({ btcChainlink: 99.9, phase: "live", second: 200, upDisplayed: 0.48 }),
+    buildSnapshot({ btcChainlink: 100.4, phase: "live", second: 240, upDisplayed: 0.58 }),
+    buildSnapshot({ btcChainlink: 101, phase: "post", second: 300, upDisplayed: 0.61 }),
+  ];
+
+  const result = buildMarketSummary({ market, nowTs: 310_000, snapshots });
+
+  assert.equal(result.summary.firstBtcSecureSecond, 240);
+});
+
+test("buildMarketSummary flags resolved-outcome conflicts against the BTC path", () => {
+  const market = {
+    closeReferencePriceOfficial: null,
+    marketId: "test-market",
+    priceToBeatOfficial: 100,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 5_000,
+    windowStartTs: 0,
+    winningOutcome: MARKET_OUTCOMES.UP,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: 100.2, phase: "live", second: 0, upDisplayed: 0.52 }),
+    buildSnapshot({ btcChainlink: 100.4, phase: "live", second: 1, upDisplayed: 0.57 }),
+    buildSnapshot({ btcChainlink: 99, phase: "post", second: 5, upDisplayed: 0.35 }),
+  ];
+
+  const result = buildMarketSummary({
+    boundaryReferences: {
+      end: {
+        chainlinkPrice: 99,
+        source: "tick",
+        ts: 5_100,
+      },
+      start: {
+        chainlinkPrice: 100.5,
+        source: "tick",
+        ts: -100,
+      },
+    },
+    market,
+    nowTs: 10_000,
+    snapshots,
+  });
+
+  assert.equal(result.summary.firstBtcSecureSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_path_conflicts_resolved"));
+});
+
+test("buildMarketSummary flags missing anchors when secure timing cannot be anchored", () => {
+  const market = {
+    closeReferencePriceOfficial: null,
+    marketId: "test-market",
+    priceToBeatOfficial: null,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 5_000,
+    windowStartTs: 0,
+    winningOutcome: MARKET_OUTCOMES.UP,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: null, phase: "live", second: 0, upDisplayed: 0.5 }),
+    buildSnapshot({ btcChainlink: null, phase: "live", second: 1, upDisplayed: 0.55 }),
+  ];
+
+  const result = buildMarketSummary({ market, nowTs: 10_000, snapshots });
+
+  assert.equal(result.summary.firstBtcSecureSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_secure_missing_anchor"));
+  assert.ok(result.qualityFlags.includes("btc_secure_no_btc_data"));
+});
+
+test("buildMarketSummary flags missing live BTC data when the anchor exists", () => {
+  const market = {
+    closeReferencePriceOfficial: 101,
+    marketId: "test-market",
+    priceToBeatOfficial: 100,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 5_000,
+    windowStartTs: 0,
+    winningOutcome: MARKET_OUTCOMES.UP,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: null, phase: "live", second: 0, upDisplayed: 0.48 }),
+    buildSnapshot({ btcChainlink: null, phase: "live", second: 1, upDisplayed: 0.52 }),
+    buildSnapshot({ btcChainlink: 101, phase: "post", second: 5, upDisplayed: 0.58 }),
+  ];
+
+  const result = buildMarketSummary({ market, nowTs: 10_000, snapshots });
+
+  assert.equal(result.summary.firstBtcSecureSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_secure_no_btc_data"));
+  assert.equal(result.qualityFlags.includes("btc_secure_missing_anchor"), false);
+});
+
+test("buildMarketSummary flags official-anchor mismatches against the derived start/end path", () => {
+  const market = {
+    closeReferencePriceOfficial: null,
+    marketId: "test-market",
+    priceToBeatOfficial: 100,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 5_000,
+    windowStartTs: 0,
+    winningOutcome: null,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: 100.4, phase: "live", second: 0, upDisplayed: 0.54 }),
+    buildSnapshot({ btcChainlink: 100.3, phase: "post", second: 5, upDisplayed: 0.51 }),
+  ];
+
+  const result = buildMarketSummary({
+    boundaryReferences: {
+      end: {
+        chainlinkPrice: 100.3,
+        source: "tick",
+        ts: 5_100,
+      },
+      start: {
+        chainlinkPrice: 100.5,
+        source: "tick",
+        ts: -100,
+      },
+    },
+    market,
+    nowTs: 10_000,
+    snapshots,
+  });
+
+  assert.equal(result.summary.resolvedOutcome, MARKET_OUTCOMES.DOWN);
+  assert.equal(result.summary.firstBtcSecureSecond, null);
+  assert.ok(result.qualityFlags.includes("btc_secure_end_off_anchor_side"));
 });
