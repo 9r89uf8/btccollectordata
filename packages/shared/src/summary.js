@@ -7,6 +7,7 @@ import {
 
 export const SUMMARY_CHECKPOINT_SECONDS = [0, 15, 30, 60, 120, 240, 295];
 export const REQUIRED_CHECKPOINT_SECONDS = [0, 15, 30, 60, 120];
+const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS_USD = [10, 20, 30];
 
 function toFiniteNumber(value) {
   if (value == null || value === "") {
@@ -268,7 +269,26 @@ function matchesWinner(delta, winner) {
   return delta < 0;
 }
 
-function computeFirstBtcWinningSideSecond({ anchor, liveSnapshots, winner }) {
+function matchesWinnerByDistance(delta, winner, minWinningDistanceUsd = 0) {
+  if (delta === null || !winner) {
+    return false;
+  }
+
+  const threshold = Math.max(0, minWinningDistanceUsd);
+
+  if (winner === MARKET_OUTCOMES.UP) {
+    return delta >= threshold;
+  }
+
+  return delta <= -threshold;
+}
+
+function computeFirstBtcWinningSideSecond({
+  anchor,
+  liveSnapshots,
+  minWinningDistanceUsd = 0,
+  winner,
+}) {
   const normalizedAnchor = toFiniteNumber(anchor);
 
   if (normalizedAnchor === null || !winner) {
@@ -281,7 +301,11 @@ function computeFirstBtcWinningSideSecond({ anchor, liveSnapshots, winner }) {
       return false;
     }
 
-    return matchesWinner(btcChainlink - normalizedAnchor, winner);
+    return matchesWinnerByDistance(
+      btcChainlink - normalizedAnchor,
+      winner,
+      minWinningDistanceUsd,
+    );
   });
 
   return winningSnapshot ? winningSnapshot.secondsFromWindowStart : null;
@@ -456,6 +480,17 @@ export function buildMarketSummary({
     liveSnapshots,
     winner: resolvedOutcome,
   });
+  const winningSideDistanceTimings = Object.fromEntries(
+    BTC_WINNING_SIDE_DISTANCE_THRESHOLDS_USD.map((thresholdUsd) => [
+      thresholdUsd,
+      computeFirstBtcWinningSideSecond({
+        anchor: winningSideAnchor,
+        liveSnapshots,
+        minWinningDistanceUsd: thresholdUsd,
+        winner: resolvedOutcome,
+      }),
+    ]),
+  );
   const btcWinningSideNoBtcData =
     liveSnapshots.filter(
       (snapshot) => toFiniteNumber(snapshot.btcChainlink) !== null,
@@ -557,6 +592,9 @@ export function buildMarketSummary({
       firstTimeAbove70: getFirstCrossingTime(liveSnapshots, 0.7),
       firstTimeAbove80: getFirstCrossingTime(liveSnapshots, 0.8),
       firstBtcWinningSideSecond: winningSideTiming,
+      firstBtcWinningSideAt10UsdSecond: winningSideDistanceTimings[10],
+      firstBtcWinningSideAt20UsdSecond: winningSideDistanceTimings[20],
+      firstBtcWinningSideAt30UsdSecond: winningSideDistanceTimings[30],
       qualityFlags,
       finalizedAt: nowTs,
     },

@@ -172,6 +172,20 @@ const BTC_WINNING_SIDE_CHECKPOINTS = [
   { label: "T+295", second: 295 },
 ];
 const BTC_WINNING_SIDE_HEADLINE_SECOND = 120;
+const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS = [
+  {
+    field: "btcWinningSideAt10UsdSecond",
+    thresholdUsd: 10,
+  },
+  {
+    field: "btcWinningSideAt20UsdSecond",
+    thresholdUsd: 20,
+  },
+  {
+    field: "btcWinningSideAt30UsdSecond",
+    thresholdUsd: 30,
+  },
+];
 const ET_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   hourCycle: "h23",
@@ -371,6 +385,15 @@ function buildFilteredRows({ summaries, markets, filters, nowTs }) {
     summaries
       .map((summary) => ({
         boundaryMove: getBoundaryMove(summary),
+        btcWinningSideAt10UsdSecond: toFiniteNumber(
+          summary.firstBtcWinningSideAt10UsdSecond,
+        ),
+        btcWinningSideAt20UsdSecond: toFiniteNumber(
+          summary.firstBtcWinningSideAt20UsdSecond,
+        ),
+        btcWinningSideAt30UsdSecond: toFiniteNumber(
+          summary.firstBtcWinningSideAt30UsdSecond,
+        ),
         btcWinningSideSecond: toFiniteNumber(summary.firstBtcWinningSideSecond),
         quality: getSummaryQuality(summary, marketsBySlug),
         qualityFlags: getSummaryQualityFlags(summary),
@@ -606,6 +629,10 @@ function getWinningSideRows(rows) {
   return rows.filter((row) => row.btcWinningSideSecond !== null);
 }
 
+function getWinningSideRowsForField(rows, fieldName) {
+  return rows.filter((row) => row[fieldName] !== null);
+}
+
 function countRowsWithFlag(rows, target) {
   return rows.filter((row) => row.qualityFlags.includes(target)).length;
 }
@@ -698,6 +725,42 @@ function buildBtcWinningSideCadenceMix(rows) {
 
       return a.sampleCadenceMs - b.sampleCadenceMs;
     });
+}
+
+function buildBtcWinningSideDistanceStats(rows, minSampleSize) {
+  if (rows.length < minSampleSize) {
+    return [];
+  }
+
+  return BTC_WINNING_SIDE_DISTANCE_THRESHOLDS.map((threshold) => {
+    const matchingRows = getWinningSideRowsForField(rows, threshold.field);
+    const matchingSeconds = matchingRows
+      .map((row) => row[threshold.field])
+      .sort((a, b) => a - b);
+
+    return {
+      checkpointStats: BTC_WINNING_SIDE_CHECKPOINTS.map((checkpoint) => {
+        const matchingCount = rows.filter(
+          (row) =>
+            row[threshold.field] !== null &&
+            row[threshold.field] <= checkpoint.second,
+        ).length;
+
+        return {
+          checkpointLabel: checkpoint.label,
+          checkpointSecond: checkpoint.second,
+          matchingCount,
+          sampleCount: rows.length,
+          share: rows.length > 0 ? matchingCount / rows.length : null,
+        };
+      }),
+      matchingCount: matchingRows.length,
+      medianWinningSideSecond: getPercentile(matchingSeconds, 0.5),
+      sampleCount: rows.length,
+      thresholdUsd: threshold.thresholdUsd,
+      share: rows.length > 0 ? matchingRows.length / rows.length : null,
+    };
+  });
 }
 
 function buildBtcWinningSideHeadline(rows) {
@@ -960,6 +1023,7 @@ export function buildAnalyticsReport({
     boundaryMoveThresholdStats: buildBoundaryMoveThresholdStats(rows, minSampleSize),
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
     btcWinningSideCheckpointStats: buildBtcWinningSideCheckpointStats(rows, minSampleSize),
+    btcWinningSideDistanceStats: buildBtcWinningSideDistanceStats(rows, minSampleSize),
     btcWinningSideHeadline: buildBtcWinningSideHeadline(rows),
     btcWinningSideOutcomeSplit: buildBtcWinningSideOutcomeSplit(rows, minSampleSize),
     btcWinningSideOverview: buildBtcWinningSideOverview(rows),

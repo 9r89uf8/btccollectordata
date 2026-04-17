@@ -173,6 +173,30 @@ function formatRelativeSecond(value) {
   return `T+${formatCount(value)}s`;
 }
 
+function formatOffsetClock(second) {
+  if (second === null || second === undefined) {
+    return "Never";
+  }
+
+  const totalSeconds = Math.max(0, Number(second) || 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatRelativeSecondWithClock(value) {
+  if (value === null || value === undefined) {
+    return "Never";
+  }
+
+  return `${formatRelativeSecond(value)} (${formatOffsetClock(value)})`;
+}
+
+function formatCheckpointLabel(checkpointSecond) {
+  return `T+${formatCount(checkpointSecond)}s (${formatOffsetClock(checkpointSecond)})`;
+}
+
 function formatBtcWinningSideHeadline(headline) {
   if (!headline || headline.sampleCount === 0) {
     return "No finalized markets match the current filters for BTC first-winning-side timing yet.";
@@ -358,6 +382,7 @@ export default function AnalyticsDashboard() {
     boundaryMoveThresholdStats = [],
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
+    btcWinningSideDistanceStats = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideHeadline = EMPTY_BTC_WINNING_SIDE_HEADLINE,
     btcWinningSideOutcomeSplit = EMPTY_BOUNDARY_MOVE_ROWS,
     btcWinningSideOverview = EMPTY_BTC_WINNING_SIDE_OVERVIEW,
@@ -699,7 +724,7 @@ export default function AnalyticsDashboard() {
           <div className="space-y-6">
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
               <MetricPanel
-                label="Reached by T+120"
+                label={`Reached by ${formatCheckpointLabel(btcWinningSideHeadline.checkpointSecond)}`}
                 value={
                   btcWinningSideHeadline.sampleCount > 0
                     ? formatProbability(btcWinningSideHeadline.share)
@@ -714,17 +739,17 @@ export default function AnalyticsDashboard() {
               />
               <MetricPanel
                 label="Median first match"
-                value={formatRelativeSecond(btcWinningSideOverview.medianWinningSideSecond)}
+                value={formatRelativeSecondWithClock(btcWinningSideOverview.medianWinningSideSecond)}
                 detail="Median earliest observed second when BTC first reached the eventual winning side."
               />
               <MetricPanel
                 label="P25 first match"
-                value={formatRelativeSecond(btcWinningSideOverview.p25WinningSideSecond)}
+                value={formatRelativeSecondWithClock(btcWinningSideOverview.p25WinningSideSecond)}
                 detail="25th-percentile first-winning-side timing across matching markets."
               />
               <MetricPanel
                 label="P75 first match"
-                value={formatRelativeSecond(btcWinningSideOverview.p75WinningSideSecond)}
+                value={formatRelativeSecondWithClock(btcWinningSideOverview.p75WinningSideSecond)}
                 detail="75th-percentile first-winning-side timing across matching markets."
               />
             </div>
@@ -754,7 +779,7 @@ export default function AnalyticsDashboard() {
                             className="border-t border-stone-200/80 bg-white"
                           >
                             <td className="px-4 py-3 font-medium text-stone-950">
-                              {row.checkpointLabel}
+                              {formatCheckpointLabel(row.checkpointSecond)}
                             </td>
                             <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
                             <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
@@ -795,7 +820,7 @@ export default function AnalyticsDashboard() {
                             <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
                             <td className="px-4 py-3">{formatProbability(row.share)}</td>
                             <td className="px-4 py-3">
-                              {formatRelativeSecond(row.medianWinningSideSecond)}
+                              {formatRelativeSecondWithClock(row.medianWinningSideSecond)}
                             </td>
                           </tr>
                         ))}
@@ -819,6 +844,76 @@ export default function AnalyticsDashboard() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Winning-side distance thresholds
+              </p>
+              {btcWinningSideDistanceStats.length === 0 ? (
+                <EmptyTable message="No BTC winning-side-by-distance rows meet the current support floor." />
+              ) : (
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Winning-side distance</th>
+                        <th className="px-4 py-3 font-semibold">Reached</th>
+                        <th className="px-4 py-3 font-semibold">Median first match</th>
+                        <th className="px-4 py-3 font-semibold">By 0:15</th>
+                        <th className="px-4 py-3 font-semibold">By 0:30</th>
+                        <th className="px-4 py-3 font-semibold">By 1:00</th>
+                        <th className="px-4 py-3 font-semibold">By 2:00</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {btcWinningSideDistanceStats.map((row) => {
+                        const by15 = row.checkpointStats.find(
+                          (item) => item.checkpointSecond === 15,
+                        );
+                        const by30 = row.checkpointStats.find(
+                          (item) => item.checkpointSecond === 30,
+                        );
+                        const by60 = row.checkpointStats.find(
+                          (item) => item.checkpointSecond === 60,
+                        );
+                        const by120 = row.checkpointStats.find(
+                          (item) => item.checkpointSecond === 120,
+                        );
+
+                        return (
+                          <tr
+                            key={row.thresholdUsd}
+                            className="border-t border-stone-200/80 bg-white"
+                          >
+                            <td className="px-4 py-3 font-medium text-stone-950">
+                              {formatBtcUsd(row.thresholdUsd)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatCount(row.matchingCount)} / {formatProbability(row.share)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatRelativeSecondWithClock(row.medianWinningSideSecond)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatProbability(by15?.share)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatProbability(by30?.share)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatProbability(by60?.share)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {formatProbability(by120?.share)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

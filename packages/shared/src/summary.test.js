@@ -64,6 +64,9 @@ test("buildMarketSummary computes checkpoint stats and good quality from complet
   assert.equal(result.summary.firstTimeAbove70, 3);
   assert.equal(result.summary.firstTimeAbove80, null);
   assert.equal(result.summary.firstBtcWinningSideSecond, 0);
+  assert.equal(result.summary.firstBtcWinningSideAt10UsdSecond, null);
+  assert.equal(result.summary.firstBtcWinningSideAt20UsdSecond, null);
+  assert.equal(result.summary.firstBtcWinningSideAt30UsdSecond, null);
   assert.deepEqual(result.qualityFlags, ["sample_cadence_ms:1000"]);
 });
 
@@ -342,4 +345,30 @@ test("buildMarketSummary uses the official anchor when finding the first winning
 
   assert.equal(result.summary.resolvedOutcome, MARKET_OUTCOMES.DOWN);
   assert.equal(result.summary.firstBtcWinningSideSecond, 4);
+});
+
+test("buildMarketSummary tracks first winning-side buckets by $10, $20, and $30 distance", () => {
+  const market = {
+    closeReferencePriceOfficial: 75_540,
+    marketId: "test-market",
+    priceToBeatOfficial: 75_500,
+    slug: "btc-updown-5m-test",
+    windowEndTs: 300_000,
+    windowStartTs: 0,
+    winningOutcome: MARKET_OUTCOMES.UP,
+  };
+  const snapshots = [
+    buildSnapshot({ btcChainlink: 75_505, phase: "live", second: 5, upDisplayed: 0.51 }),
+    buildSnapshot({ btcChainlink: 75_512, phase: "live", second: 10, upDisplayed: 0.54 }),
+    buildSnapshot({ btcChainlink: 75_523, phase: "live", second: 20, upDisplayed: 0.58 }),
+    buildSnapshot({ btcChainlink: 75_531, phase: "live", second: 35, upDisplayed: 0.61 }),
+    buildSnapshot({ btcChainlink: 75_540, phase: "post", second: 300, upDisplayed: 0.65 }),
+  ];
+
+  const result = buildMarketSummary({ market, nowTs: 310_000, snapshots });
+
+  assert.equal(result.summary.firstBtcWinningSideSecond, 5);
+  assert.equal(result.summary.firstBtcWinningSideAt10UsdSecond, 10);
+  assert.equal(result.summary.firstBtcWinningSideAt20UsdSecond, 20);
+  assert.equal(result.summary.firstBtcWinningSideAt30UsdSecond, 35);
 });

@@ -181,6 +181,9 @@ export default defineSchema({
     firstTimeAbove80: nullable(v.number()),
     firstBtcSecureSecond: optionalNullable(v.number()),
     firstBtcWinningSideSecond: optionalNullable(v.number()),
+    firstBtcWinningSideAt10UsdSecond: optionalNullable(v.number()),
+    firstBtcWinningSideAt20UsdSecond: optionalNullable(v.number()),
+    firstBtcWinningSideAt30UsdSecond: optionalNullable(v.number()),
     qualityFlags: v.array(v.string()),
     finalizedAt: v.number(),
   })
