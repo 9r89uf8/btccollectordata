@@ -219,6 +219,20 @@ function formatBestSignalDetail(card, minSampleSize) {
   )}.`;
 }
 
+function formatEdgeDetail(card, minSampleSize) {
+  if (!card || card.bucketLabel == null) {
+    return `No ${formatSideLabel(card?.side)} edge row at ${formatCheckpointLabel(
+      card?.checkpointSecond ?? 0,
+    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
+  }
+
+  return `${card.bucketLabel} on ${formatCount(card.sampleCount)} samples. Market priced ${formatSideLabel(
+    card.side,
+  )} at ${formatProbability(card.averageDisplayedProbability)} on average versus a realized win rate of ${formatProbability(
+    card.winRate,
+  )}.`;
+}
+
 function formatCadenceMix(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return "Cadence mix unavailable.";
@@ -337,6 +351,7 @@ const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
 };
 
 const EMPTY_BTC_BEST_SIGNAL_ROWS = [];
+const EMPTY_BTC_MARKET_EDGE_ROWS = [];
 
 const EMPTY_OVERVIEW = {
   downWins: 0,
@@ -398,6 +413,9 @@ export default function AnalyticsDashboard() {
     boundaryMoveThresholdStats = [],
     btcBestSignalCards = EMPTY_BTC_BEST_SIGNAL_ROWS,
     btcBestSignalMinSamples = 40,
+    btcMarketEdgeBucketRows = EMPTY_BTC_MARKET_EDGE_ROWS,
+    btcMarketEdgeCards = EMPTY_BTC_MARKET_EDGE_ROWS,
+    btcMarketEdgeMinSamples = 40,
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityBucketRows = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
@@ -799,6 +817,73 @@ export default function AnalyticsDashboard() {
                   />
                 ))}
               </div>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                BTC signal vs market price edge
+              </p>
+              <p className="max-w-3xl text-sm leading-7 text-stone-700">
+                This compares the historical win rate for a BTC-distance bucket
+                against the average market price for that same side. Positive edge
+                means the market underpriced the signal on average; negative edge
+                means it overpriced it.
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                {btcMarketEdgeCards.map((card) => (
+                  <MetricPanel
+                    key={`${card.checkpointSecond}-${card.side}`}
+                    label={`Best ${formatSideLabel(card.side)} edge at ${formatCheckpointLabel(
+                      card.checkpointSecond,
+                    )}`}
+                    value={
+                      card.bucketLabel == null
+                        ? "No edge"
+                        : formatCalibrationGap(card.averageEdge)
+                    }
+                    detail={formatEdgeDetail(card, btcMarketEdgeMinSamples)}
+                  />
+                ))}
+              </div>
+              {btcMarketEdgeBucketRows.length === 0 ? (
+                <EmptyTable message="No BTC signal vs market-price edge rows meet the current support floor." />
+              ) : (
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Checkpoint</th>
+                        <th className="px-4 py-3 font-semibold">BTC side</th>
+                        <th className="px-4 py-3 font-semibold">Distance bucket</th>
+                        <th className="px-4 py-3 font-semibold">Samples</th>
+                        <th className="px-4 py-3 font-semibold">Avg market price</th>
+                        <th className="px-4 py-3 font-semibold">Realized win rate</th>
+                        <th className="px-4 py-3 font-semibold">Edge</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {btcMarketEdgeBucketRows.map((row) => (
+                        <tr
+                          key={`${row.checkpoint}-${row.side}-${row.minUsd}`}
+                          className="border-t border-stone-200/80 bg-white"
+                        >
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {formatCheckpointLabel(row.checkpointSecond)}
+                          </td>
+                          <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
+                          <td className="px-4 py-3">{row.bucketLabel}</td>
+                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                          <td className="px-4 py-3">
+                            {formatProbability(row.averageDisplayedProbability)}
+                          </td>
+                          <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
+                          <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">

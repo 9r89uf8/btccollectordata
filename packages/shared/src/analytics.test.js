@@ -941,6 +941,8 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count,
     deltaT60,
     deltaT120,
+    displayedT60 = null,
+    displayedT120 = null,
     resolvedOutcome,
     winningCount,
   }) {
@@ -952,6 +954,14 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
       markets.push(buildMarket({ quality: DATA_QUALITY.GOOD, slug }));
       summaries.push(
         buildSummary({
+          d120:
+            deltaT120 !== null && deltaT120 < 0 && displayedT120 !== null
+              ? displayedT120
+              : null,
+          d60:
+            deltaT60 !== null && deltaT60 < 0 && displayedT60 !== null
+              ? displayedT60
+              : null,
           btcDeltaFromAnchorAtT60: deltaT60,
           btcDeltaFromAnchorAtT120: deltaT120,
           priceToBeatOfficial: 74_000,
@@ -961,6 +971,14 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
               ? MARKET_OUTCOMES.DOWN
               : MARKET_OUTCOMES.UP,
           slug,
+          t120:
+            deltaT120 !== null && deltaT120 >= 0 && displayedT120 !== null
+              ? displayedT120
+              : null,
+          t60:
+            deltaT60 !== null && deltaT60 >= 0 && displayedT60 !== null
+              ? displayedT60
+              : null,
           windowStartTs: counter * 1_000,
         }),
       );
@@ -971,6 +989,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 45,
     deltaT60: 25,
     deltaT120: null,
+    displayedT60: 0.72,
     resolvedOutcome: MARKET_OUTCOMES.UP,
     winningCount: 36,
   });
@@ -978,6 +997,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 50,
     deltaT60: 60,
     deltaT120: null,
+    displayedT60: 0.82,
     resolvedOutcome: MARKET_OUTCOMES.UP,
     winningCount: 35,
   });
@@ -985,6 +1005,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 42,
     deltaT60: -35,
     deltaT120: null,
+    displayedT60: 0.56,
     resolvedOutcome: MARKET_OUTCOMES.DOWN,
     winningCount: 30,
   });
@@ -992,6 +1013,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 41,
     deltaT60: -60,
     deltaT120: null,
+    displayedT60: 0.74,
     resolvedOutcome: MARKET_OUTCOMES.DOWN,
     winningCount: 28,
   });
@@ -999,6 +1021,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 48,
     deltaT60: null,
     deltaT120: 55,
+    displayedT120: 0.82,
     resolvedOutcome: MARKET_OUTCOMES.UP,
     winningCount: 42,
   });
@@ -1006,6 +1029,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 44,
     deltaT60: null,
     deltaT120: 35,
+    displayedT120: 0.68,
     resolvedOutcome: MARKET_OUTCOMES.UP,
     winningCount: 34,
   });
@@ -1013,6 +1037,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 46,
     deltaT60: null,
     deltaT120: -25,
+    displayedT120: 0.64,
     resolvedOutcome: MARKET_OUTCOMES.DOWN,
     winningCount: 30,
   });
@@ -1020,6 +1045,7 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
     count: 52,
     deltaT60: null,
     deltaT120: -65,
+    displayedT120: 0.74,
     resolvedOutcome: MARKET_OUTCOMES.DOWN,
     winningCount: 45,
   });
@@ -1070,6 +1096,119 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
       winRate: 45 / 52,
     },
   ]);
+
+  const upEdgeAt60 = result.btcMarketEdgeBucketRows.find(
+    (row) =>
+      row.checkpoint === "t60" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.bucketLabel === "$20-$29.99",
+  );
+  assert.equal(upEdgeAt60.averageAbsDeltaUsd, 25);
+  assert.equal(upEdgeAt60.averageDeltaUsd, 25);
+  assert.ok(Math.abs(upEdgeAt60.averageDisplayedProbability - 0.72) < 1e-9);
+  assert.ok(Math.abs(upEdgeAt60.averageEdge - (36 / 45 - 0.72)) < 1e-9);
+  assert.equal(upEdgeAt60.bucketLabel, "$20-$29.99");
+  assert.equal(upEdgeAt60.checkpoint, "t60");
+  assert.equal(upEdgeAt60.checkpointLabel, "T+60");
+  assert.equal(upEdgeAt60.checkpointSecond, 60);
+  assert.equal(upEdgeAt60.maxUsd, 30);
+  assert.equal(upEdgeAt60.minUsd, 20);
+  assert.equal(upEdgeAt60.sampleCount, 45);
+  assert.equal(upEdgeAt60.side, MARKET_OUTCOMES.UP);
+  assert.equal(upEdgeAt60.winCount, 36);
+  assert.equal(upEdgeAt60.winRate, 36 / 45);
+
+  const downEdgeAt120 = result.btcMarketEdgeBucketRows.find(
+    (row) =>
+      row.checkpoint === "t120" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.bucketLabel === "$50+",
+  );
+  assert.equal(downEdgeAt120.averageAbsDeltaUsd, 65);
+  assert.equal(downEdgeAt120.averageDeltaUsd, -65);
+  assert.ok(Math.abs(downEdgeAt120.averageDisplayedProbability - 0.74) < 1e-9);
+  assert.ok(Math.abs(downEdgeAt120.averageEdge - (45 / 52 - 0.74)) < 1e-9);
+  assert.equal(downEdgeAt120.bucketLabel, "$50+");
+  assert.equal(downEdgeAt120.checkpoint, "t120");
+  assert.equal(downEdgeAt120.checkpointLabel, "T+120");
+  assert.equal(downEdgeAt120.checkpointSecond, 120);
+  assert.equal(downEdgeAt120.maxUsd, null);
+  assert.equal(downEdgeAt120.minUsd, 50);
+  assert.equal(downEdgeAt120.sampleCount, 52);
+  assert.equal(downEdgeAt120.side, MARKET_OUTCOMES.DOWN);
+  assert.equal(downEdgeAt120.winCount, 45);
+  assert.equal(downEdgeAt120.winRate, 45 / 52);
+
+  assert.equal(result.btcMarketEdgeMinSamples, 40);
+  assert.equal(result.btcMarketEdgeCards.length, 4);
+  assert.deepEqual(
+    result.btcMarketEdgeCards.map((card) => ({
+      averageDeltaUsd: card.averageDeltaUsd,
+      bucketLabel: card.bucketLabel,
+      checkpointSecond: card.checkpointSecond,
+      sampleCount: card.sampleCount,
+      side: card.side,
+      winRate: card.winRate,
+    })),
+    [
+      {
+        averageDeltaUsd: 25,
+        bucketLabel: "$20-$29.99",
+        checkpointSecond: 60,
+        sampleCount: 45,
+        side: MARKET_OUTCOMES.UP,
+        winRate: 36 / 45,
+      },
+      {
+        averageDeltaUsd: -35,
+        bucketLabel: "$30-$49.99",
+        checkpointSecond: 60,
+        sampleCount: 42,
+        side: MARKET_OUTCOMES.DOWN,
+        winRate: 30 / 42,
+      },
+      {
+        averageDeltaUsd: 35,
+        bucketLabel: "$30-$49.99",
+        checkpointSecond: 120,
+        sampleCount: 44,
+        side: MARKET_OUTCOMES.UP,
+        winRate: 34 / 44,
+      },
+      {
+        averageDeltaUsd: -65,
+        bucketLabel: "$50+",
+        checkpointSecond: 120,
+        sampleCount: 52,
+        side: MARKET_OUTCOMES.DOWN,
+        winRate: 45 / 52,
+      },
+    ],
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[0].averageDisplayedProbability - 0.72) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[0].averageEdge - (36 / 45 - 0.72)) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[1].averageDisplayedProbability - 0.56) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[1].averageEdge - (30 / 42 - 0.56)) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[2].averageDisplayedProbability - 0.68) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[2].averageEdge - (34 / 44 - 0.68)) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[3].averageDisplayedProbability - 0.74) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(result.btcMarketEdgeCards[3].averageEdge - (45 / 52 - 0.74)) < 1e-9,
+  );
 });
 
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {
