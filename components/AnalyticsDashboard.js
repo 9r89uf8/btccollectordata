@@ -216,6 +216,14 @@ function formatCalibrationGap(value) {
   return `${sign}${(value * 100).toFixed(1)} pts`;
 }
 
+function formatSignalQualityScore(value) {
+  if (value == null) {
+    return "pending";
+  }
+
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function formatBoundaryMoveHeadline(headline) {
   if (!headline || headline.sampleCount === 0) {
     return "No finalized markets in the current filter set have both a start and end BTC reference yet.";
@@ -318,6 +326,20 @@ function formatEdgeDetail(card, minSampleSize) {
   )} at ${formatProbability(card.averageDisplayedProbability)} on average versus a realized win rate of ${formatProbability(
     card.winRate,
   )}.`;
+}
+
+function formatSignalQualityEdgeDetail(card, minSampleSize) {
+  if (!card || card.distanceBucketLabel == null || card.qualityBucketLabel == null) {
+    return `No ${formatSideLabel(card?.side)} signal-quality row at ${formatCheckpointLabel(
+      card?.checkpointSecond ?? 0,
+    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
+  }
+
+  return `${card.distanceBucketLabel}, ${card.qualityBucketLabel}, ${formatCount(
+    card.sampleCount,
+  )} samples. Avg market price ${formatProbability(
+    card.averageDisplayedProbability,
+  )}, realized win rate ${formatProbability(card.winRate)}.`;
 }
 
 function formatCadenceMix(rows) {
@@ -439,6 +461,7 @@ const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
 
 const EMPTY_BTC_BEST_SIGNAL_ROWS = [];
 const EMPTY_BTC_MARKET_EDGE_ROWS = [];
+const EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS = [];
 
 const EMPTY_OVERVIEW = {
   downWins: 0,
@@ -551,6 +574,9 @@ export default function AnalyticsDashboard() {
     btcMarketEdgeBucketRows = EMPTY_BTC_MARKET_EDGE_ROWS,
     btcMarketEdgeCards = EMPTY_BTC_MARKET_EDGE_ROWS,
     btcMarketEdgeMinSamples = 40,
+    btcSignalQualityEdgeBucketRows = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
+    btcSignalQualityEdgeCards = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
+    btcSignalQualityEdgeMinSamples = 40,
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityBucketRows = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
@@ -1615,6 +1641,100 @@ export default function AnalyticsDashboard() {
             </div>
           </div>
         )}
+      </TableShell>
+
+      <TableShell
+        caption="Signal quality"
+        title="BTC signal quality vs market edge"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          This layer asks whether the BTC signal was not just large, but also
+          clean relative to the path BTC took into the checkpoint. Signal
+          quality is `abs(delta from anchor) / BTC path length to checkpoint`,
+          so higher values mean more net movement and less churn.
+        </p>
+
+        <div className="space-y-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+            Best clean-signal edges
+          </p>
+          <p className="max-w-3xl text-sm leading-7 text-stone-700">
+            These cards pick the strongest positive edge rows after splitting the
+            existing BTC-distance buckets by signal-quality bucket, with a hard
+            minimum support floor of {` ${formatCount(btcSignalQualityEdgeMinSamples)} `}
+            samples.
+          </p>
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+            {btcSignalQualityEdgeCards.map((card) => (
+              <MetricPanel
+                key={`${card.checkpointSecond}-${card.side}`}
+                label={`Best ${formatSideLabel(card.side)} quality edge at ${formatCheckpointLabel(
+                  card.checkpointSecond,
+                )}`}
+                value={
+                  card.distanceBucketLabel == null
+                    ? "No edge"
+                    : formatCalibrationGap(card.averageEdge)
+                }
+                detail={formatSignalQualityEdgeDetail(
+                  card,
+                  btcSignalQualityEdgeMinSamples,
+                )}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+            Distance bucket by signal quality
+          </p>
+          {btcSignalQualityEdgeBucketRows.length === 0 ? (
+            <EmptyTable message="No BTC signal-quality edge rows meet the current support floor." />
+          ) : (
+            <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+              <table className="min-w-full text-left text-sm text-stone-700">
+                <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Checkpoint</th>
+                    <th className="px-4 py-3 font-semibold">BTC side</th>
+                    <th className="px-4 py-3 font-semibold">Distance bucket</th>
+                    <th className="px-4 py-3 font-semibold">Quality bucket</th>
+                    <th className="px-4 py-3 font-semibold">Samples</th>
+                    <th className="px-4 py-3 font-semibold">Avg quality</th>
+                    <th className="px-4 py-3 font-semibold">Avg market price</th>
+                    <th className="px-4 py-3 font-semibold">Realized win rate</th>
+                    <th className="px-4 py-3 font-semibold">Edge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {btcSignalQualityEdgeBucketRows.map((row) => (
+                    <tr
+                      key={`${row.checkpoint}-${row.side}-${row.distanceBucketId}-${row.qualityBucketId}`}
+                      className="border-t border-stone-200/80 bg-white"
+                    >
+                      <td className="px-4 py-3 font-medium text-stone-950">
+                        {formatCheckpointLabel(row.checkpointSecond)}
+                      </td>
+                      <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
+                      <td className="px-4 py-3">{row.distanceBucketLabel}</td>
+                      <td className="px-4 py-3">{row.qualityBucketLabel}</td>
+                      <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                      <td className="px-4 py-3">
+                        {formatSignalQualityScore(row.averageSignalQualityScore)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {formatProbability(row.averageDisplayedProbability)}
+                      </td>
+                      <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
+                      <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </TableShell>
 
       <TableShell

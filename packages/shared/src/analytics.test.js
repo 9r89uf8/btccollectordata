@@ -1262,6 +1262,209 @@ test("buildAnalyticsReport picks best-signal cards from bucket rows with a 40-sa
   );
 });
 
+test("buildAnalyticsReport splits BTC market edge rows by normalized signal quality", () => {
+  const markets = [];
+  const summaries = [];
+  let counter = 0;
+
+  function appendGroup({
+    count,
+    deltaT60 = null,
+    deltaT120 = null,
+    displayedT60 = null,
+    displayedT120 = null,
+    pathLengthT60 = null,
+    pathLengthT120 = null,
+    resolvedOutcome,
+    winningCount,
+  }) {
+    for (let index = 0; index < count; index += 1) {
+      counter += 1;
+      const slug = `quality-${counter}`;
+      const isWinningRow = index < winningCount;
+
+      markets.push(buildMarket({ quality: DATA_QUALITY.GOOD, slug }));
+      summaries.push(
+        buildSummary({
+          d120:
+            deltaT120 !== null && deltaT120 < 0 && displayedT120 !== null
+              ? displayedT120
+              : null,
+          d60:
+            deltaT60 !== null && deltaT60 < 0 && displayedT60 !== null
+              ? displayedT60
+              : null,
+          btcDeltaFromAnchorAtT60: deltaT60,
+          btcDeltaFromAnchorAtT120: deltaT120,
+          btcPathLengthTo60Usd: pathLengthT60,
+          btcPathLengthTo120Usd: pathLengthT120,
+          priceToBeatOfficial: 74_000,
+          resolvedOutcome: isWinningRow
+            ? resolvedOutcome
+            : resolvedOutcome === MARKET_OUTCOMES.UP
+              ? MARKET_OUTCOMES.DOWN
+              : MARKET_OUTCOMES.UP,
+          slug,
+          t120:
+            deltaT120 !== null && deltaT120 >= 0 && displayedT120 !== null
+              ? displayedT120
+              : null,
+          t60:
+            deltaT60 !== null && deltaT60 >= 0 && displayedT60 !== null
+              ? displayedT60
+              : null,
+          windowStartTs: counter * 1_000,
+        }),
+      );
+    }
+  }
+
+  appendGroup({
+    count: 44,
+    deltaT60: 25,
+    displayedT60: 0.67,
+    pathLengthT60: 60,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 34,
+  });
+  appendGroup({
+    count: 44,
+    deltaT60: 25,
+    displayedT60: 0.66,
+    pathLengthT60: 160,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 25,
+  });
+  appendGroup({
+    count: 45,
+    deltaT60: -40,
+    displayedT60: 0.69,
+    pathLengthT60: 90,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 33,
+  });
+  appendGroup({
+    count: 42,
+    deltaT60: -40,
+    displayedT60: 0.68,
+    pathLengthT60: 200,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 24,
+  });
+  appendGroup({
+    count: 48,
+    deltaT120: 55,
+    displayedT120: 0.83,
+    pathLengthT120: 120,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 43,
+  });
+  appendGroup({
+    count: 48,
+    deltaT120: 55,
+    displayedT120: 0.79,
+    pathLengthT120: 260,
+    resolvedOutcome: MARKET_OUTCOMES.UP,
+    winningCount: 35,
+  });
+  appendGroup({
+    count: 46,
+    deltaT120: -60,
+    displayedT120: 0.84,
+    pathLengthT120: 150,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 40,
+  });
+  appendGroup({
+    count: 46,
+    deltaT120: -60,
+    displayedT120: 0.8,
+    pathLengthT120: 320,
+    resolvedOutcome: MARKET_OUTCOMES.DOWN,
+    winningCount: 28,
+  });
+
+  const result = buildAnalyticsReport({
+    filters: {
+      dateRange: "all",
+      minSampleSize: 1,
+      quality: "all",
+    },
+    markets,
+    nowTs: counter * 1_000 + 10_000,
+    summaries,
+  });
+
+  const upCleanAt60 = result.btcSignalQualityEdgeBucketRows.find(
+    (row) =>
+      row.checkpoint === "t60" &&
+      row.side === MARKET_OUTCOMES.UP &&
+      row.distanceBucketLabel === "$20-$29.99" &&
+      row.qualityBucketLabel === "0.35+ (clean)",
+  );
+  assert.equal(upCleanAt60.sampleCount, 44);
+  assert.ok(
+    Math.abs(upCleanAt60.averageSignalQualityScore - 25 / 60) < 1e-9,
+  );
+  assert.ok(Math.abs(upCleanAt60.averageDisplayedProbability - 0.67) < 1e-9);
+  assert.ok(Math.abs(upCleanAt60.averageEdge - (34 / 44 - 0.67)) < 1e-9);
+
+  const downNoisyAt120 = result.btcSignalQualityEdgeBucketRows.find(
+    (row) =>
+      row.checkpoint === "t120" &&
+      row.side === MARKET_OUTCOMES.DOWN &&
+      row.distanceBucketLabel === "$50+" &&
+      row.qualityBucketLabel === "0.00-0.19 (noisy)",
+  );
+  assert.equal(downNoisyAt120.sampleCount, 46);
+  assert.ok(
+    Math.abs(downNoisyAt120.averageSignalQualityScore - 60 / 320) < 1e-9,
+  );
+  assert.ok(Math.abs(downNoisyAt120.averageDisplayedProbability - 0.8) < 1e-9);
+  assert.ok(Math.abs(downNoisyAt120.averageEdge - (28 / 46 - 0.8)) < 1e-9);
+
+  assert.equal(result.btcSignalQualityEdgeMinSamples, 40);
+  assert.deepEqual(
+    result.btcSignalQualityEdgeCards.map((card) => ({
+      checkpointSecond: card.checkpointSecond,
+      distanceBucketLabel: card.distanceBucketLabel,
+      qualityBucketLabel: card.qualityBucketLabel,
+      sampleCount: card.sampleCount,
+      side: card.side,
+    })),
+    [
+      {
+        checkpointSecond: 60,
+        distanceBucketLabel: "$20-$29.99",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 44,
+        side: MARKET_OUTCOMES.UP,
+      },
+      {
+        checkpointSecond: 60,
+        distanceBucketLabel: "$30-$49.99",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 45,
+        side: MARKET_OUTCOMES.DOWN,
+      },
+      {
+        checkpointSecond: 120,
+        distanceBucketLabel: "$50+",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 48,
+        side: MARKET_OUTCOMES.UP,
+      },
+      {
+        checkpointSecond: 120,
+        distanceBucketLabel: "$50+",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 46,
+        side: MARKET_OUTCOMES.DOWN,
+      },
+    ],
+  );
+});
+
 test("buildAnalyticsReport computes calibration rows and crossing distributions", () => {
   const nowTs = 5_000_000;
   const markets = [

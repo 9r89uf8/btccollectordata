@@ -200,6 +200,26 @@ const BTC_BEST_SIGNAL_TARGETS = [
 const BTC_EDGE_ACTIONABLE_CHECKPOINTS = new Set(
   BTC_BEST_SIGNAL_TARGETS.map((target) => target.checkpointSecond),
 );
+const BTC_SIGNAL_QUALITY_BUCKETS = [
+  {
+    id: "quality_0_20",
+    label: "0.00-0.19 (noisy)",
+    max: 0.2,
+    min: 0,
+  },
+  {
+    id: "quality_20_35",
+    label: "0.20-0.34 (mixed)",
+    max: 0.35,
+    min: 0.2,
+  },
+  {
+    id: "quality_35_plus",
+    label: "0.35+ (clean)",
+    max: null,
+    min: 0.35,
+  },
+];
 const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS = [
   {
     field: "btcWinningSideAt10UsdSecond",
@@ -446,6 +466,30 @@ function getSideProbability(summary, checkpoint, side) {
 
 function getBtcDeltaValue(summary, checkpoint) {
   return toFiniteNumber(summary[checkpoint.btcDeltaField]);
+}
+
+function getBtcPathLengthForCheckpoint(summary, checkpointSecond) {
+  if (checkpointSecond === 60) {
+    return toFiniteNumber(summary.btcPathLengthTo60Usd);
+  }
+
+  if (checkpointSecond === 120) {
+    return toFiniteNumber(summary.btcPathLengthTo120Usd);
+  }
+
+  return null;
+}
+
+function getBtcSignalQualityScore(summary, checkpoint) {
+  const checkpointSecond = Number(checkpoint.id.replace("t", ""));
+  const btcDeltaUsd = getBtcDeltaValue(summary, checkpoint);
+  const pathLengthUsd = getBtcPathLengthForCheckpoint(summary, checkpointSecond);
+
+  if (btcDeltaUsd === null || pathLengthUsd === null || pathLengthUsd <= 0) {
+    return null;
+  }
+
+  return Math.abs(btcDeltaUsd) / pathLengthUsd;
 }
 
 function getCohortCheckpointConfig(checkpointId) {
@@ -1296,6 +1340,218 @@ function buildBtcMarketEdgeCards(rows, minSampleSize) {
   };
 }
 
+function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
+  const aggregates = new Map();
+
+  for (const row of rows) {
+    for (const checkpoint of ANALYTICS_CHECKPOINTS) {
+      const checkpointSecond = Number(checkpoint.id.replace("t", ""));
+
+      if (!BTC_EDGE_ACTIONABLE_CHECKPOINTS.has(checkpointSecond)) {
+        continue;
+      }
+
+      const btcDeltaUsd = getBtcDeltaValue(row.summary, checkpoint);
+      const signalQualityScore = getBtcSignalQualityScore(row.summary, checkpoint);
+
+      if (btcDeltaUsd === null || signalQualityScore === null) {
+        continue;
+      }
+
+      const side =
+        btcDeltaUsd >= 0 ? MARKET_OUTCOMES.UP : MARKET_OUTCOMES.DOWN;
+      const displayedProbability = getSideProbability(row.summary, checkpoint, side);
+
+      if (displayedProbability === null) {
+        continue;
+      }
+
+      for (const distanceBucket of BTC_CONDITIONAL_RELIABILITY_BUCKETS) {
+        const absDeltaUsd = Math.abs(btcDeltaUsd);
+
+        if (absDeltaUsd < distanceBucket.minUsd) {
+          continue;
+        }
+
+        if (
+          distanceBucket.maxUsd !== null &&
+          absDeltaUsd >= distanceBucket.maxUsd
+        ) {
+          continue;
+        }
+
+        for (const qualityBucket of BTC_SIGNAL_QUALITY_BUCKETS) {
+          if (signalQualityScore < qualityBucket.min) {
+            continue;
+          }
+
+          if (qualityBucket.max !== null && signalQualityScore >= qualityBucket.max) {
+            continue;
+          }
+
+          const key = `${checkpoint.id}:${side}:${distanceBucket.id}:${qualityBucket.id}`;
+          const aggregate = aggregates.get(key) ?? {
+            averageDeltaTotal: 0,
+            averageDisplayedTotal: 0,
+            averageSignalQualityTotal: 0,
+            checkpoint: checkpoint.id,
+            checkpointLabel: checkpoint.label,
+            checkpointSecond,
+            distanceBucketId: distanceBucket.id,
+            distanceBucketLabel: distanceBucket.label,
+            distanceMaxUsd: distanceBucket.maxUsd,
+            distanceMinUsd: distanceBucket.minUsd,
+            qualityBucketId: qualityBucket.id,
+            qualityBucketLabel: qualityBucket.label,
+            qualityMax: qualityBucket.max,
+            qualityMin: qualityBucket.min,
+            sampleCount: 0,
+            side,
+            winCount: 0,
+          };
+
+          aggregate.averageDeltaTotal += btcDeltaUsd;
+          aggregate.averageDisplayedTotal += displayedProbability;
+          aggregate.averageSignalQualityTotal += signalQualityScore;
+          aggregate.sampleCount += 1;
+          aggregate.winCount += row.summary.resolvedOutcome === side ? 1 : 0;
+          aggregates.set(key, aggregate);
+        }
+      }
+    }
+  }
+
+  return [...aggregates.values()]
+    .filter((aggregate) => aggregate.sampleCount >= minSampleSize)
+    .map((aggregate) => {
+      const winRate =
+        aggregate.sampleCount > 0
+          ? aggregate.winCount / aggregate.sampleCount
+          : null;
+      const averageDisplayedProbability =
+        aggregate.sampleCount > 0
+          ? aggregate.averageDisplayedTotal / aggregate.sampleCount
+          : null;
+
+      return {
+        averageDeltaUsd:
+          aggregate.sampleCount > 0
+            ? aggregate.averageDeltaTotal / aggregate.sampleCount
+            : null,
+        averageDisplayedProbability,
+        averageEdge:
+          winRate !== null && averageDisplayedProbability !== null
+            ? winRate - averageDisplayedProbability
+            : null,
+        averageSignalQualityScore:
+          aggregate.sampleCount > 0
+            ? aggregate.averageSignalQualityTotal / aggregate.sampleCount
+            : null,
+        checkpoint: aggregate.checkpoint,
+        checkpointLabel: aggregate.checkpointLabel,
+        checkpointSecond: aggregate.checkpointSecond,
+        distanceBucketId: aggregate.distanceBucketId,
+        distanceBucketLabel: aggregate.distanceBucketLabel,
+        distanceMaxUsd: aggregate.distanceMaxUsd,
+        distanceMinUsd: aggregate.distanceMinUsd,
+        qualityBucketId: aggregate.qualityBucketId,
+        qualityBucketLabel: aggregate.qualityBucketLabel,
+        qualityMax: aggregate.qualityMax,
+        qualityMin: aggregate.qualityMin,
+        sampleCount: aggregate.sampleCount,
+        side: aggregate.side,
+        winCount: aggregate.winCount,
+        winRate,
+      };
+    })
+    .sort((a, b) => {
+      const checkpointDelta =
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === a.checkpoint) -
+        ANALYTICS_CHECKPOINTS.findIndex((item) => item.id === b.checkpoint);
+
+      if (checkpointDelta !== 0) {
+        return checkpointDelta;
+      }
+
+      const sideDelta = SIDE_ORDER.indexOf(a.side) - SIDE_ORDER.indexOf(b.side);
+
+      if (sideDelta !== 0) {
+        return sideDelta;
+      }
+
+      const distanceDelta = a.distanceMinUsd - b.distanceMinUsd;
+
+      if (distanceDelta !== 0) {
+        return distanceDelta;
+      }
+
+      return a.qualityMin - b.qualityMin;
+    });
+}
+
+function buildBtcSignalQualityEdgeCards(rows, minSampleSize) {
+  const effectiveMinSampleSize = Math.max(
+    minSampleSize,
+    BTC_BEST_SIGNAL_MIN_SAMPLES,
+  );
+  const qualityRows = buildBtcSignalQualityEdgeRows(rows, effectiveMinSampleSize);
+
+  return {
+    cards: BTC_BEST_SIGNAL_TARGETS.map((target) => {
+      const matchingRows = qualityRows.filter(
+        (row) =>
+          row.checkpointSecond === target.checkpointSecond &&
+          row.side === target.side,
+      );
+
+      if (matchingRows.length === 0) {
+        return {
+          averageDeltaUsd: null,
+          averageDisplayedProbability: null,
+          averageEdge: null,
+          averageSignalQualityScore: null,
+          checkpointSecond: target.checkpointSecond,
+          distanceBucketLabel: null,
+          qualityBucketLabel: null,
+          sampleCount: 0,
+          side: target.side,
+          winRate: null,
+        };
+      }
+
+      const bestRow = [...matchingRows].sort((a, b) => {
+        const edgeDelta = (b.averageEdge ?? -Infinity) - (a.averageEdge ?? -Infinity);
+
+        if (edgeDelta !== 0) {
+          return edgeDelta;
+        }
+
+        const sampleDelta = b.sampleCount - a.sampleCount;
+
+        if (sampleDelta !== 0) {
+          return sampleDelta;
+        }
+
+        return (b.averageSignalQualityScore ?? -Infinity) - (a.averageSignalQualityScore ?? -Infinity);
+      })[0];
+
+      return {
+        averageDeltaUsd: bestRow.averageDeltaUsd,
+        averageDisplayedProbability: bestRow.averageDisplayedProbability,
+        averageEdge: bestRow.averageEdge,
+        averageSignalQualityScore: bestRow.averageSignalQualityScore,
+        checkpointSecond: bestRow.checkpointSecond,
+        distanceBucketLabel: bestRow.distanceBucketLabel,
+        qualityBucketLabel: bestRow.qualityBucketLabel,
+        sampleCount: bestRow.sampleCount,
+        side: bestRow.side,
+        winRate: bestRow.winRate,
+      };
+    }),
+    minSampleSize: effectiveMinSampleSize,
+  };
+}
+
 function buildBtcWinningSideHeadline(rows) {
   const checkpoint = BTC_WINNING_SIDE_CHECKPOINTS.find(
     (item) => item.second === BTC_WINNING_SIDE_HEADLINE_SECOND,
@@ -2100,6 +2356,10 @@ export function buildAnalyticsReport({
   });
   const btcBestSignal = buildBtcBestSignalCards(rows, minSampleSize);
   const btcMarketEdge = buildBtcMarketEdgeCards(rows, minSampleSize);
+  const btcSignalQualityEdge = buildBtcSignalQualityEdgeCards(
+    rows,
+    minSampleSize,
+  );
 
   return {
     appliedFilters: {
@@ -2118,6 +2378,12 @@ export function buildAnalyticsReport({
     btcMarketEdgeBucketRows: buildBtcMarketEdgeBucketRows(rows, minSampleSize),
     btcMarketEdgeCards: btcMarketEdge.cards,
     btcMarketEdgeMinSamples: btcMarketEdge.minSampleSize,
+    btcSignalQualityEdgeBucketRows: buildBtcSignalQualityEdgeRows(
+      rows,
+      minSampleSize,
+    ),
+    btcSignalQualityEdgeCards: btcSignalQualityEdge.cards,
+    btcSignalQualityEdgeMinSamples: btcSignalQualityEdge.minSampleSize,
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
     btcConditionalReliabilityBucketRows: buildBtcConditionalReliabilityBucketRows(
       rows,
