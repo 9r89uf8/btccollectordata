@@ -462,6 +462,7 @@ const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
 const EMPTY_BTC_BEST_SIGNAL_ROWS = [];
 const EMPTY_BTC_MARKET_EDGE_ROWS = [];
 const EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS = [];
+const EMPTY_BTC_CANDIDATE_RULE_ROWS = [];
 
 const EMPTY_OVERVIEW = {
   downWins: 0,
@@ -577,6 +578,10 @@ export default function AnalyticsDashboard() {
     btcSignalQualityEdgeBucketRows = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
     btcSignalQualityEdgeCards = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
     btcSignalQualityEdgeMinSamples = 40,
+    btcCandidateRules = EMPTY_BTC_CANDIDATE_RULE_ROWS,
+    btcCandidateRulesMinEdge = 0.03,
+    btcCandidateRulesMinSamples = 40,
+    btcCandidateRulesMinWinRate = 0.7,
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityBucketRows = EMPTY_BOUNDARY_MOVE_ROWS,
     btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
@@ -1639,6 +1644,65 @@ export default function AnalyticsDashboard() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="Candidate rules"
+        title="Shortlist of BTC setups that look both strong and mispriced"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          This filters the signal-quality rows down to the setups that clear all
+          three gates at once: support of at least{" "}
+          {formatCount(btcCandidateRulesMinSamples)} samples, realized win rate of
+          at least {formatProbability(btcCandidateRulesMinWinRate)}, and positive
+          edge of at least {formatCalibrationGap(btcCandidateRulesMinEdge)}.
+        </p>
+
+        {btcCandidateRules.length === 0 ? (
+          <EmptyTable message="No signal-quality rows currently clear the candidate-rule floor." />
+        ) : (
+          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+            <table className="min-w-full text-left text-sm text-stone-700">
+              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Checkpoint</th>
+                  <th className="px-4 py-3 font-semibold">BTC side</th>
+                  <th className="px-4 py-3 font-semibold">Distance bucket</th>
+                  <th className="px-4 py-3 font-semibold">Quality bucket</th>
+                  <th className="px-4 py-3 font-semibold">Samples</th>
+                  <th className="px-4 py-3 font-semibold">Avg quality</th>
+                  <th className="px-4 py-3 font-semibold">Avg market price</th>
+                  <th className="px-4 py-3 font-semibold">Win rate</th>
+                  <th className="px-4 py-3 font-semibold">Edge</th>
+                </tr>
+              </thead>
+              <tbody>
+                {btcCandidateRules.map((row) => (
+                  <tr
+                    key={`${row.checkpoint}-${row.side}-${row.distanceBucketId}-${row.qualityBucketId}`}
+                    className="border-t border-stone-200/80 bg-white"
+                  >
+                    <td className="px-4 py-3 font-medium text-stone-950">
+                      {formatCheckpointLabel(row.checkpointSecond)}
+                    </td>
+                    <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
+                    <td className="px-4 py-3">{row.distanceBucketLabel}</td>
+                    <td className="px-4 py-3">{row.qualityBucketLabel}</td>
+                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                    <td className="px-4 py-3">
+                      {formatSignalQualityScore(row.averageSignalQualityScore)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {formatProbability(row.averageDisplayedProbability)}
+                    </td>
+                    <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
+                    <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </TableShell>

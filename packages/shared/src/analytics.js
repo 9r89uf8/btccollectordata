@@ -179,6 +179,8 @@ const BTC_WINNING_SIDE_CHECKPOINTS = [
 ];
 const BTC_WINNING_SIDE_HEADLINE_SECOND = 120;
 const BTC_BEST_SIGNAL_MIN_SAMPLES = 40;
+const BTC_CANDIDATE_RULE_MIN_EDGE = 0.03;
+const BTC_CANDIDATE_RULE_MIN_WIN_RATE = 0.7;
 const BTC_BEST_SIGNAL_TARGETS = [
   {
     checkpointSecond: 60,
@@ -1552,6 +1554,41 @@ function buildBtcSignalQualityEdgeCards(rows, minSampleSize) {
   };
 }
 
+function buildBtcCandidateRules(rows, minSampleSize) {
+  const effectiveMinSampleSize = Math.max(
+    minSampleSize,
+    BTC_BEST_SIGNAL_MIN_SAMPLES,
+  );
+  const candidateRows = buildBtcSignalQualityEdgeRows(rows, effectiveMinSampleSize)
+    .filter(
+      (row) =>
+        (row.averageEdge ?? -Infinity) >= BTC_CANDIDATE_RULE_MIN_EDGE &&
+        (row.winRate ?? -Infinity) >= BTC_CANDIDATE_RULE_MIN_WIN_RATE,
+    )
+    .sort((a, b) => {
+      const edgeDelta = (b.averageEdge ?? -Infinity) - (a.averageEdge ?? -Infinity);
+
+      if (edgeDelta !== 0) {
+        return edgeDelta;
+      }
+
+      const winRateDelta = (b.winRate ?? -Infinity) - (a.winRate ?? -Infinity);
+
+      if (winRateDelta !== 0) {
+        return winRateDelta;
+      }
+
+      return b.sampleCount - a.sampleCount;
+    });
+
+  return {
+    minEdge: BTC_CANDIDATE_RULE_MIN_EDGE,
+    minSampleSize: effectiveMinSampleSize,
+    minWinRate: BTC_CANDIDATE_RULE_MIN_WIN_RATE,
+    rows: candidateRows,
+  };
+}
+
 function buildBtcWinningSideHeadline(rows) {
   const checkpoint = BTC_WINNING_SIDE_CHECKPOINTS.find(
     (item) => item.second === BTC_WINNING_SIDE_HEADLINE_SECOND,
@@ -2360,6 +2397,7 @@ export function buildAnalyticsReport({
     rows,
     minSampleSize,
   );
+  const btcCandidateRules = buildBtcCandidateRules(rows, minSampleSize);
 
   return {
     appliedFilters: {
@@ -2384,6 +2422,10 @@ export function buildAnalyticsReport({
     ),
     btcSignalQualityEdgeCards: btcSignalQualityEdge.cards,
     btcSignalQualityEdgeMinSamples: btcSignalQualityEdge.minSampleSize,
+    btcCandidateRules: btcCandidateRules.rows,
+    btcCandidateRulesMinEdge: btcCandidateRules.minEdge,
+    btcCandidateRulesMinSamples: btcCandidateRules.minSampleSize,
+    btcCandidateRulesMinWinRate: btcCandidateRules.minWinRate,
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),
     btcConditionalReliabilityBucketRows: buildBtcConditionalReliabilityBucketRows(
       rows,

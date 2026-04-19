@@ -1370,7 +1370,7 @@ test("buildAnalyticsReport splits BTC market edge rows by normalized signal qual
   appendGroup({
     count: 46,
     deltaT120: -60,
-    displayedT120: 0.84,
+    displayedT120: 0.83,
     pathLengthT120: 150,
     resolvedOutcome: MARKET_OUTCOMES.DOWN,
     winningCount: 40,
@@ -1453,6 +1453,48 @@ test("buildAnalyticsReport splits BTC market edge rows by normalized signal qual
         qualityBucketLabel: "0.35+ (clean)",
         sampleCount: 48,
         side: MARKET_OUTCOMES.UP,
+      },
+      {
+        checkpointSecond: 120,
+        distanceBucketLabel: "$50+",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 46,
+        side: MARKET_OUTCOMES.DOWN,
+      },
+    ],
+  );
+  assert.equal(result.btcCandidateRulesMinSamples, 40);
+  assert.equal(result.btcCandidateRulesMinWinRate, 0.7);
+  assert.equal(result.btcCandidateRulesMinEdge, 0.03);
+  assert.deepEqual(
+    result.btcCandidateRules.map((row) => ({
+      checkpointSecond: row.checkpointSecond,
+      distanceBucketLabel: row.distanceBucketLabel,
+      qualityBucketLabel: row.qualityBucketLabel,
+      sampleCount: row.sampleCount,
+      side: row.side,
+    })),
+    [
+      {
+        checkpointSecond: 60,
+        distanceBucketLabel: "$20-$29.99",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 44,
+        side: MARKET_OUTCOMES.UP,
+      },
+      {
+        checkpointSecond: 120,
+        distanceBucketLabel: "$50+",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 48,
+        side: MARKET_OUTCOMES.UP,
+      },
+      {
+        checkpointSecond: 60,
+        distanceBucketLabel: "$30-$49.99",
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 45,
+        side: MARKET_OUTCOMES.DOWN,
       },
       {
         checkpointSecond: 120,
