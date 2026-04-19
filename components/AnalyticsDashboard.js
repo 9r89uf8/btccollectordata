@@ -8,6 +8,9 @@ import {
   ANALYTICS_DATE_RANGE_OPTIONS,
   ANALYTICS_MIN_SAMPLE_OPTIONS,
   ANALYTICS_QUALITY_OPTIONS,
+  COHORT_DRILLDOWN_CHECKPOINT_OPTIONS,
+  COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS,
+  COHORT_DRILLDOWN_SIDE_OPTIONS,
 } from "@/packages/shared/src/analytics.js";
 import {
   formatBtcUsd,
@@ -108,6 +111,16 @@ function formatCount(value) {
   }).format(value);
 }
 
+function formatCountMetric(value) {
+  if (value == null) {
+    return "pending";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: Number.isInteger(value) ? 0 : 1,
+  }).format(value);
+}
+
 function formatSideLabel(side) {
   if (side === "up") {
     return "Up";
@@ -118,6 +131,80 @@ function formatSideLabel(side) {
   }
 
   return side ?? "pending";
+}
+
+function formatSignedBtcUsd(value) {
+  if (value == null) {
+    return "pending";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatBtcUsd(value)}`;
+}
+
+function formatRateDifference(value) {
+  if (value == null) {
+    return "pending";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(1)} pts`;
+}
+
+function formatRangeCi(low, high, formatter) {
+  if (low == null || high == null) {
+    return "95% CI unavailable";
+  }
+
+  return `95% CI ${formatter(low)} to ${formatter(high)}`;
+}
+
+function formatProbabilityCi(summary) {
+  if (!summary || summary.rate == null) {
+    return "95% CI unavailable";
+  }
+
+  return formatRangeCi(summary.ciLow, summary.ciHigh, formatProbability);
+}
+
+function formatValueByMetric(value, format) {
+  if (format === "share") {
+    return formatProbability(value);
+  }
+
+  if (format === "count") {
+    return formatCountMetric(value);
+  }
+
+  if (format === "signedBtcUsd") {
+    return formatSignedBtcUsd(value);
+  }
+
+  return formatBtcUsd(value);
+}
+
+function formatStatusLabel(status) {
+  if (status === "supported") {
+    return "supported at 95%";
+  }
+
+  if (status === "not_supported") {
+    return "not supported";
+  }
+
+  return "underpowered";
+}
+
+function getStatusTone(status) {
+  if (status === "supported") {
+    return "emerald";
+  }
+
+  if (status === "not_supported") {
+    return "stone";
+  }
+
+  return "amber";
 }
 
 function formatCalibrationGap(value) {
@@ -382,20 +469,68 @@ const EMPTY_HEADLINE_FINDING = {
   winRate: null,
 };
 
+const EMPTY_RATE_SUMMARY = {
+  ciHigh: null,
+  ciLow: null,
+  rate: null,
+  sampleCount: 0,
+  successCount: 0,
+};
+
+const EMPTY_COHORT_DRILLDOWN = {
+  checkpoint: "t120",
+  checkpointLabel: "T+120",
+  checkpointSecond: 120,
+  distanceBucketId: "30_50",
+  distanceBucketLabel: "$30-$49.99",
+  hourRows: [],
+  hypotheses: [],
+  lossRate: EMPTY_RATE_SUMMARY,
+  loserCount: 0,
+  numericMetrics: [],
+  sampleCount: 0,
+  selectionSide: "down",
+  sessionRows: [],
+  winRate: EMPTY_RATE_SUMMARY,
+  winnerCount: 0,
+};
+
 export default function AnalyticsDashboard() {
   const [filters, setFilters] = useState({
     dateRange: "7d",
     minSampleSize: 3,
     quality: "all",
   });
+  const [cohortSelection, setCohortSelection] = useState({
+    checkpoint: "t120",
+    distanceBucket: "30_50",
+    side: "down",
+  });
   const deferredFilters = useDeferredValue(filters);
+  const deferredCohortSelection = useDeferredValue(cohortSelection);
   const analytics = useQuery(api.analytics.getDashboard, deferredFilters);
+  const cohortDrilldown = useQuery(api.analytics.getCohortDrilldown, {
+    checkpoint: deferredCohortSelection.checkpoint,
+    dateRange: deferredFilters.dateRange,
+    distanceBucket: deferredCohortSelection.distanceBucket,
+    quality: deferredFilters.quality,
+    side: deferredCohortSelection.side,
+  });
 
   function updateFilter(key, value) {
     startTransition(() => {
       setFilters((current) => ({
         ...current,
         [key]: key === "minSampleSize" ? Number(value) : value,
+      }));
+    });
+  }
+
+  function updateCohortSelection(key, value) {
+    startTransition(() => {
+      setCohortSelection((current) => ({
+        ...current,
+        [key]: value,
       }));
     });
   }
@@ -431,6 +566,23 @@ export default function AnalyticsDashboard() {
     overview = EMPTY_OVERVIEW,
     thresholdStats = [],
   } = analytics;
+  const activeCohortDrilldown =
+    cohortDrilldown === undefined ? EMPTY_COHORT_DRILLDOWN : cohortDrilldown;
+  const {
+    checkpointLabel: cohortCheckpointLabel,
+    checkpointSecond: cohortCheckpointSecond,
+    distanceBucketLabel: cohortDistanceBucketLabel,
+    hourRows: cohortHourRows,
+    hypotheses: cohortHypotheses,
+    lossRate: cohortLossRate,
+    loserCount: cohortLoserCount,
+    numericMetrics: cohortNumericMetrics,
+    sampleCount: cohortSampleCount,
+    selectionSide: cohortSide,
+    sessionRows: cohortSessionRows,
+    winRate: cohortWinRate,
+    winnerCount: cohortWinnerCount,
+  } = activeCohortDrilldown;
 
   return (
     <section className="space-y-6">
@@ -1139,6 +1291,327 @@ export default function AnalyticsDashboard() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+      </TableShell>
+
+      <TableShell
+        caption="Cohort drilldown"
+        title="Why the selected BTC bucket still fails sometimes"
+      >
+        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
+          This block compares winners and losers inside one BTC checkpoint cohort.
+          The default view is the exact `T+120 / Down / $30-$49.99` row that
+          raised the question about why a meaningful share of those markets still
+          flipped before the close.
+        </p>
+
+        <div className="mb-6 grid gap-4 lg:grid-cols-3">
+          <ControlField label="Checkpoint">
+            <FilterSelect
+              value={cohortSelection.checkpoint}
+              onChange={(event) =>
+                updateCohortSelection("checkpoint", event.target.value)
+              }
+              options={COHORT_DRILLDOWN_CHECKPOINT_OPTIONS}
+            />
+          </ControlField>
+          <ControlField label="BTC side">
+            <FilterSelect
+              value={cohortSelection.side}
+              onChange={(event) =>
+                updateCohortSelection("side", event.target.value)
+              }
+              options={COHORT_DRILLDOWN_SIDE_OPTIONS}
+            />
+          </ControlField>
+          <ControlField label="Distance bucket">
+            <FilterSelect
+              value={cohortSelection.distanceBucket}
+              onChange={(event) =>
+                updateCohortSelection("distanceBucket", event.target.value)
+              }
+              options={COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS}
+            />
+          </ControlField>
+        </div>
+
+        {cohortDrilldown === undefined ? (
+          <EmptyTable message="Loading cohort drilldown..." />
+        ) : cohortSampleCount === 0 ? (
+          <EmptyTable message="No finalized markets match the selected checkpoint, side, distance bucket, and filters." />
+        ) : (
+          <div className="space-y-6">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+              <MetricPanel
+                label="Selected cohort"
+                value={`${formatSideLabel(cohortSide)} ${cohortDistanceBucketLabel}`}
+                detail={`${formatCheckpointLabel(
+                  cohortCheckpointSecond,
+                )} with ${formatCount(cohortSampleCount)} filtered market${cohortSampleCount === 1 ? "" : "s"} in the bucket.`}
+              />
+              <MetricPanel
+                label="Cohort win rate"
+                value={formatProbability(cohortWinRate.rate)}
+                detail={`${formatCount(cohortWinnerCount)} wins out of ${formatCount(
+                  cohortSampleCount,
+                )}. ${formatProbabilityCi(cohortWinRate)}`}
+              />
+              <MetricPanel
+                label="Cohort loss rate"
+                value={formatProbability(cohortLossRate.rate)}
+                detail={`${formatCount(cohortLoserCount)} losses out of ${formatCount(
+                  cohortSampleCount,
+                )}. ${formatProbabilityCi(cohortLossRate)}`}
+              />
+              <MetricPanel
+                label="Question"
+                value="Winners vs losers"
+                detail={`What separated the ${formatSideLabel(
+                  cohortSide,
+                )} winners from the failures inside ${cohortCheckpointLabel} / ${cohortDistanceBucketLabel}?`}
+              />
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Numeric comparisons
+              </p>
+              <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                <table className="min-w-full text-left text-sm text-stone-700">
+                  <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Metric</th>
+                      <th className="px-4 py-3 font-semibold">
+                        {formatSideLabel(cohortSide)} winners
+                      </th>
+                      <th className="px-4 py-3 font-semibold">Losers</th>
+                      <th className="px-4 py-3 font-semibold">Winner - loser</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cohortNumericMetrics.map((metric) => (
+                      <tr
+                        key={metric.id}
+                        className="border-t border-stone-200/80 bg-white align-top"
+                      >
+                        <td className="px-4 py-3 font-medium text-stone-950">
+                          {metric.label}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="space-y-1">
+                            <p className="font-medium text-stone-950">
+                              {formatValueByMetric(metric.winners.mean, metric.format)}
+                            </p>
+                            <p className="text-xs text-stone-500">
+                              {formatCount(metric.winners.sampleCount)} observations
+                            </p>
+                            <p className="text-xs text-stone-500">
+                              {formatRangeCi(
+                                metric.winners.ciLow,
+                                metric.winners.ciHigh,
+                                (value) => formatValueByMetric(value, metric.format),
+                              )}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="space-y-1">
+                            <p className="font-medium text-stone-950">
+                              {formatValueByMetric(metric.losers.mean, metric.format)}
+                            </p>
+                            <p className="text-xs text-stone-500">
+                              {formatCount(metric.losers.sampleCount)} observations
+                            </p>
+                            <p className="text-xs text-stone-500">
+                              {formatRangeCi(
+                                metric.losers.ciLow,
+                                metric.losers.ciHigh,
+                                (value) => formatValueByMetric(value, metric.format),
+                              )}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="space-y-1">
+                            <p className="font-medium text-stone-950">
+                              {formatValueByMetric(metric.difference.mean, metric.format)}
+                            </p>
+                            <p className="text-xs text-stone-500">
+                              {formatRangeCi(
+                                metric.difference.ciLow,
+                                metric.difference.ciHigh,
+                                (value) => formatValueByMetric(value, metric.format),
+                              )}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="space-y-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                  ET session loss rates
+                </p>
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Session</th>
+                        <th className="px-4 py-3 font-semibold">Total</th>
+                        <th className="px-4 py-3 font-semibold">Wins</th>
+                        <th className="px-4 py-3 font-semibold">Losses</th>
+                        <th className="px-4 py-3 font-semibold">Loss rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cohortSessionRows.map((row) => (
+                        <tr key={row.id} className="border-t border-stone-200/80 bg-white">
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {row.label}
+                          </td>
+                          <td className="px-4 py-3">{formatCount(row.totalCount)}</td>
+                          <td className="px-4 py-3">{formatCount(row.winnerCount)}</td>
+                          <td className="px-4 py-3">{formatCount(row.loserCount)}</td>
+                          <td className="px-4 py-3">
+                            <div className="space-y-1">
+                              <p className="font-medium text-stone-950">
+                                {formatProbability(row.lossRate.rate)}
+                              </p>
+                              <p className="text-xs text-stone-500">
+                                {formatProbabilityCi(row.lossRate)}
+                              </p>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                  ET hour loss rates
+                </p>
+                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
+                  <table className="min-w-full text-left text-sm text-stone-700">
+                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">ET hour</th>
+                        <th className="px-4 py-3 font-semibold">Total</th>
+                        <th className="px-4 py-3 font-semibold">Wins</th>
+                        <th className="px-4 py-3 font-semibold">Losses</th>
+                        <th className="px-4 py-3 font-semibold">Loss rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cohortHourRows.map((row) => (
+                        <tr
+                          key={row.hour}
+                          className="border-t border-stone-200/80 bg-white"
+                        >
+                          <td className="px-4 py-3 font-medium text-stone-950">
+                            {row.label}
+                          </td>
+                          <td className="px-4 py-3">{formatCount(row.totalCount)}</td>
+                          <td className="px-4 py-3">{formatCount(row.winnerCount)}</td>
+                          <td className="px-4 py-3">{formatCount(row.loserCount)}</td>
+                          <td className="px-4 py-3">
+                            <div className="space-y-1">
+                              <p className="font-medium text-stone-950">
+                                {formatProbability(row.lossRate.rate)}
+                              </p>
+                              <p className="text-xs text-stone-500">
+                                {formatProbabilityCi(row.lossRate)}
+                              </p>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                Hypothesis results
+              </p>
+              <div className="grid gap-4 xl:grid-cols-2">
+                {cohortHypotheses.map((hypothesis) => (
+                  <article
+                    key={hypothesis.id}
+                    className="rounded-[1.2rem] border border-black/10 bg-white p-5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+                          {hypothesis.id.toUpperCase()}
+                        </p>
+                        <h4 className="mt-2 text-lg font-semibold tracking-[-0.03em] text-stone-950">
+                          {hypothesis.label}
+                        </h4>
+                      </div>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getToneClasses(
+                          getStatusTone(hypothesis.status),
+                        )}`}
+                      >
+                        {formatStatusLabel(hypothesis.status)}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-[1rem] bg-stone-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">
+                          {hypothesis.groupALabel}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-stone-950">
+                          {formatProbability(hypothesis.groupA.rate)}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {formatProbabilityCi(hypothesis.groupA)}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {formatCount(hypothesis.groupA.sampleCount)} rows
+                        </p>
+                      </div>
+                      <div className="rounded-[1rem] bg-stone-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">
+                          {hypothesis.groupBLabel}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-stone-950">
+                          {formatProbability(hypothesis.groupB.rate)}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {formatProbabilityCi(hypothesis.groupB)}
+                        </p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          {formatCount(hypothesis.groupB.sampleCount)} rows
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-7 text-stone-700">
+                      Difference: {formatRateDifference(hypothesis.difference.difference)}.
+                      {" "}
+                      {formatRangeCi(
+                        hypothesis.difference.ciLow,
+                        hypothesis.difference.ciHigh,
+                        formatRateDifference,
+                      )}
+                    </p>
+                  </article>
+                ))}
+              </div>
             </div>
           </div>
         )}

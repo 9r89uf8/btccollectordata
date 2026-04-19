@@ -3,12 +3,27 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import {
   ANALYTICS_DATE_RANGE_OPTIONS,
+  COHORT_DRILLDOWN_CHECKPOINT_OPTIONS,
+  COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS,
+  COHORT_DRILLDOWN_SIDE_OPTIONS,
   ANALYTICS_MIN_SAMPLE_OPTIONS,
   buildAnalyticsReport,
+  buildCohortDrilldownReport,
 } from "../packages/shared/src/analytics.js";
 
 const analyticsDateRangeValue = v.union(
   ...ANALYTICS_DATE_RANGE_OPTIONS.map((option) => v.literal(option.id)),
+);
+const cohortCheckpointValue = v.union(
+  ...COHORT_DRILLDOWN_CHECKPOINT_OPTIONS.map((option) => v.literal(option.id)),
+);
+const cohortDistanceBucketValue = v.union(
+  ...COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS.map((option) =>
+    v.literal(option.id),
+  ),
+);
+const cohortSideValue = v.union(
+  ...COHORT_DRILLDOWN_SIDE_OPTIONS.map((option) => v.literal(option.id)),
 );
 
 function getDateRangeStart(dateRange, nowTs) {
@@ -87,6 +102,44 @@ export const getDashboard = query({
       },
       markets,
       nowTs,
+      summaries,
+    });
+  },
+});
+
+export const getCohortDrilldown = query({
+  args: {
+    checkpoint: cohortCheckpointValue,
+    dateRange: v.optional(analyticsDateRangeValue),
+    distanceBucket: cohortDistanceBucketValue,
+    quality: v.optional(
+      v.union(
+        v.literal("all"),
+        v.literal("good"),
+        v.literal("partial"),
+        v.literal("gap"),
+      ),
+    ),
+    side: cohortSideValue,
+  },
+  handler: async (ctx, args) => {
+    const nowTs = Date.now();
+    const dateRange = args.dateRange ?? "7d";
+    const summaries = await listCandidateSummaries(ctx, dateRange, nowTs);
+    const markets = await listMarketsForSummaries(ctx, summaries);
+
+    return buildCohortDrilldownReport({
+      filters: {
+        dateRange,
+        quality: args.quality ?? "all",
+      },
+      markets,
+      nowTs,
+      selection: {
+        checkpoint: args.checkpoint,
+        distanceBucket: args.distanceBucket,
+        side: args.side,
+      },
       summaries,
     });
   },

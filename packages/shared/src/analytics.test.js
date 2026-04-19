@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DATA_QUALITY, MARKET_OUTCOMES } from "./market.js";
-import { buildAnalyticsReport } from "./analytics.js";
+import {
+  buildAnalyticsReport,
+  buildCohortDrilldownReport,
+} from "./analytics.js";
 
 function buildMarket({ quality = DATA_QUALITY.GOOD, slug }) {
   return {
@@ -12,6 +15,14 @@ function buildMarket({ quality = DATA_QUALITY.GOOD, slug }) {
 }
 
 function buildSummary({
+  anchorCrossCountAfter60 = null,
+  anchorCrossCountAfter120 = null,
+  anchorCrossCountTo60 = null,
+  anchorCrossCountTo120 = null,
+  btcPathLengthTo60Usd = null,
+  btcPathLengthTo120Usd = null,
+  btcRangeTo60Usd = null,
+  btcRangeTo120Usd = null,
   btcChainlinkAtEnd = null,
   btcChainlinkAtStart = null,
   btcDeltaFromAnchorAtT0 = null,
@@ -36,20 +47,44 @@ function buildSummary({
   firstTimeAbove60 = null,
   firstTimeAbove70 = null,
   firstTimeAbove80 = null,
+  maxAdverseExcursionFrom60Usd = null,
+  maxAdverseExcursionFrom120Usd = null,
+  momentumInto60Usd30s = null,
+  momentumInto120Usd30s = null,
   priceToBeatDerived = null,
   priceToBeatOfficial = null,
   qualityFlags = ["sample_cadence_ms:1000"],
   resolvedOutcome,
+  residualPathLengthFrom60Usd = null,
+  residualPathLengthFrom120Usd = null,
+  residualRangeFrom60Usd = null,
+  residualRangeFrom120Usd = null,
   slug,
+  timeAboveAnchorShareTo60 = null,
+  timeAboveAnchorShareTo120 = null,
+  timeOnWinningSideShareAfter60 = null,
+  timeOnWinningSideShareAfter120 = null,
   t15 = null,
   t30 = null,
   t60 = null,
   t120 = null,
   t240 = null,
   t295 = null,
+  validBtcBucketCountAfter60 = null,
+  validBtcBucketCountAfter120 = null,
+  validBtcBucketCountTo60 = null,
+  validBtcBucketCountTo120 = null,
   windowStartTs,
 }) {
   return {
+    anchorCrossCountAfter60,
+    anchorCrossCountAfter120,
+    anchorCrossCountTo60,
+    anchorCrossCountTo120,
+    btcPathLengthTo60Usd,
+    btcPathLengthTo120Usd,
+    btcRangeTo60Usd,
+    btcRangeTo120Usd,
     btcChainlinkAtEnd,
     btcChainlinkAtStart,
     btcDeltaFromAnchorAtT0,
@@ -77,12 +112,24 @@ function buildSummary({
     firstTimeAbove60,
     firstTimeAbove70,
     firstTimeAbove80,
+    maxAdverseExcursionFrom60Usd,
+    maxAdverseExcursionFrom120Usd,
     marketId: `${slug}-id`,
     marketSlug: slug,
+    momentumInto60Usd30s,
+    momentumInto120Usd30s,
     priceToBeatDerived,
     priceToBeatOfficial,
     qualityFlags,
     resolvedOutcome,
+    residualPathLengthFrom60Usd,
+    residualPathLengthFrom120Usd,
+    residualRangeFrom60Usd,
+    residualRangeFrom120Usd,
+    timeAboveAnchorShareTo60,
+    timeAboveAnchorShareTo120,
+    timeOnWinningSideShareAfter60,
+    timeOnWinningSideShareAfter120,
     upDisplayedAtT0: null,
     upDisplayedAtT15: t15,
     upDisplayedAtT30: t30,
@@ -95,6 +142,10 @@ function buildSummary({
     upMin: null,
     upRange: null,
     upStdDev: null,
+    validBtcBucketCountAfter60,
+    validBtcBucketCountAfter120,
+    validBtcBucketCountTo60,
+    validBtcBucketCountTo120,
     windowEndTs: windowStartTs + 300_000,
     windowStartTs,
   };
@@ -1355,4 +1406,114 @@ test("buildAnalyticsReport computes calibration rows and crossing distributions"
       winRate: 1,
     },
   );
+});
+
+test("buildCohortDrilldownReport builds winner-loser diagnostics for a selected BTC bucket", () => {
+  const nowTs = 5_000_000;
+  const markets = [
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m1" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m2" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m3" }),
+    buildMarket({ quality: DATA_QUALITY.GOOD, slug: "m4" }),
+  ];
+  const summaries = [
+    buildSummary({
+      anchorCrossCountAfter120: 0,
+      anchorCrossCountTo120: 1,
+      btcDeltaFromAnchorAtT120: -35,
+      btcPathLengthTo120Usd: 90,
+      btcRangeTo120Usd: 38,
+      maxAdverseExcursionFrom120Usd: 12,
+      momentumInto120Usd30s: -9,
+      residualPathLengthFrom120Usd: 22,
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m1",
+      timeOnWinningSideShareAfter120: 0.9,
+      windowStartTs: Date.UTC(2026, 3, 18, 12, 0, 0),
+    }),
+    buildSummary({
+      anchorCrossCountAfter120: 2,
+      anchorCrossCountTo120: 2,
+      btcDeltaFromAnchorAtT120: -42,
+      btcPathLengthTo120Usd: 110,
+      btcRangeTo120Usd: 46,
+      maxAdverseExcursionFrom120Usd: 18,
+      momentumInto120Usd30s: -5,
+      residualPathLengthFrom120Usd: 30,
+      resolvedOutcome: MARKET_OUTCOMES.DOWN,
+      slug: "m2",
+      timeOnWinningSideShareAfter120: 0.8,
+      windowStartTs: Date.UTC(2026, 3, 18, 13, 0, 0),
+    }),
+    buildSummary({
+      anchorCrossCountAfter120: 4,
+      anchorCrossCountTo120: 5,
+      btcDeltaFromAnchorAtT120: -37,
+      btcPathLengthTo120Usd: 170,
+      btcRangeTo120Usd: 62,
+      maxAdverseExcursionFrom120Usd: 44,
+      momentumInto120Usd30s: 11,
+      residualPathLengthFrom120Usd: 96,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m3",
+      timeOnWinningSideShareAfter120: 0.25,
+      windowStartTs: Date.UTC(2026, 3, 18, 14, 0, 0),
+    }),
+    buildSummary({
+      anchorCrossCountAfter120: 3,
+      anchorCrossCountTo120: 4,
+      btcDeltaFromAnchorAtT120: -48,
+      btcPathLengthTo120Usd: 150,
+      btcRangeTo120Usd: 58,
+      maxAdverseExcursionFrom120Usd: 36,
+      momentumInto120Usd30s: 8,
+      residualPathLengthFrom120Usd: 88,
+      resolvedOutcome: MARKET_OUTCOMES.UP,
+      slug: "m4",
+      timeOnWinningSideShareAfter120: 0.3,
+      windowStartTs: Date.UTC(2026, 3, 18, 16, 0, 0),
+    }),
+  ];
+
+  const result = buildCohortDrilldownReport({
+    filters: {
+      dateRange: "all",
+      quality: "all",
+    },
+    markets,
+    nowTs,
+    selection: {
+      checkpoint: "t120",
+      distanceBucket: "30_50",
+      side: MARKET_OUTCOMES.DOWN,
+    },
+    summaries,
+  });
+
+  assert.equal(result.sampleCount, 4);
+  assert.equal(result.winnerCount, 2);
+  assert.equal(result.loserCount, 2);
+  assert.equal(result.distanceBucketLabel, "$30-$49.99");
+  assert.equal(result.checkpointLabel, "T+120");
+  assert.equal(result.winRate.rate, 0.5);
+  assert.equal(result.lossRate.rate, 0.5);
+
+  const pathLengthMetric = result.numericMetrics.find(
+    (metric) => metric.id === "btcPathLength",
+  );
+  assert.equal(pathLengthMetric.winners.mean, 100);
+  assert.equal(pathLengthMetric.losers.mean, 160);
+  assert.equal(pathLengthMetric.difference.mean, -60);
+
+  const sessionRow = result.sessionRows.find((row) => row.id === "morning");
+  assert.equal(sessionRow.totalCount, 3);
+  assert.equal(sessionRow.loserCount, 1);
+
+  const hourRow = result.hourRows.find((row) => row.label === "10:00 AM");
+  assert.equal(hourRow.totalCount, 1);
+  assert.equal(hourRow.loserCount, 1);
+
+  assert.equal(result.hypotheses.length, 4);
+  assert.equal(result.hypotheses[0].id, "h1");
+  assert.equal(result.hypotheses[3].id, "h4");
 });

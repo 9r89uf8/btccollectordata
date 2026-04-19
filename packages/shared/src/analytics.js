@@ -216,26 +216,62 @@ const BTC_WINNING_SIDE_DISTANCE_THRESHOLDS = [
 ];
 const BTC_CONDITIONAL_RELIABILITY_BUCKETS = [
   {
+    id: "10_20",
     label: "$10-$19.99",
     maxUsd: 20,
     minUsd: 10,
   },
   {
+    id: "20_30",
     label: "$20-$29.99",
     maxUsd: 30,
     minUsd: 20,
   },
   {
+    id: "30_50",
     label: "$30-$49.99",
     maxUsd: 50,
     minUsd: 30,
   },
   {
+    id: "50_plus",
     label: "$50+",
     maxUsd: null,
     minUsd: 50,
   },
 ];
+const COHORT_DRILLDOWN_CHECKPOINTS = [
+  {
+    anchorCrossCountAfterField: "anchorCrossCountAfter60",
+    anchorCrossCountField: "anchorCrossCountTo60",
+    btcPathLengthField: "btcPathLengthTo60Usd",
+    btcRangeField: "btcRangeTo60Usd",
+    checkpoint: ANALYTICS_CHECKPOINTS.find((item) => item.id === "t60"),
+    id: "t60",
+    maxAdverseExcursionField: "maxAdverseExcursionFrom60Usd",
+    momentumField: "momentumInto60Usd30s",
+    residualPathLengthField: "residualPathLengthFrom60Usd",
+    second: 60,
+    sessionHypothesisHour: "morning",
+    timeOnWinningSideShareAfterField: "timeOnWinningSideShareAfter60",
+  },
+  {
+    anchorCrossCountAfterField: "anchorCrossCountAfter120",
+    anchorCrossCountField: "anchorCrossCountTo120",
+    btcPathLengthField: "btcPathLengthTo120Usd",
+    btcRangeField: "btcRangeTo120Usd",
+    checkpoint: ANALYTICS_CHECKPOINTS.find((item) => item.id === "t120"),
+    id: "t120",
+    maxAdverseExcursionField: "maxAdverseExcursionFrom120Usd",
+    momentumField: "momentumInto120Usd30s",
+    residualPathLengthField: "residualPathLengthFrom120Usd",
+    second: 120,
+    sessionHypothesisHour: "morning",
+    timeOnWinningSideShareAfterField: "timeOnWinningSideShareAfter120",
+  },
+];
+const COHORT_HYPOTHESIS_MIN_GROUP_SIZE = 12;
+const COHORT_HYPOTHESIS_Z_SCORE = 1.96;
 const ET_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   hourCycle: "h23",
@@ -267,6 +303,27 @@ const ET_SESSION_BUCKETS = [
     startHour: 18,
   },
 ];
+
+export const COHORT_DRILLDOWN_CHECKPOINT_OPTIONS = COHORT_DRILLDOWN_CHECKPOINTS.map(
+  ({ checkpoint, id, second }) => ({
+    id,
+    label: checkpoint.label,
+    second,
+  }),
+);
+
+export const COHORT_DRILLDOWN_SIDE_OPTIONS = [
+  { id: MARKET_OUTCOMES.UP, label: "Up" },
+  { id: MARKET_OUTCOMES.DOWN, label: "Down" },
+];
+
+export const COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS =
+  BTC_CONDITIONAL_RELIABILITY_BUCKETS.map((bucket) => ({
+    id: bucket.id,
+    label: bucket.label,
+    maxUsd: bucket.maxUsd,
+    minUsd: bucket.minUsd,
+  }));
 
 function toFiniteNumber(value) {
   if (value == null || value === "") {
@@ -389,6 +446,20 @@ function getSideProbability(summary, checkpoint, side) {
 
 function getBtcDeltaValue(summary, checkpoint) {
   return toFiniteNumber(summary[checkpoint.btcDeltaField]);
+}
+
+function getCohortCheckpointConfig(checkpointId) {
+  return COHORT_DRILLDOWN_CHECKPOINTS.find((checkpoint) => checkpoint.id === checkpointId)
+    ?? COHORT_DRILLDOWN_CHECKPOINTS[1];
+}
+
+function getCohortDistanceBucket(bucketId) {
+  return COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS.find((bucket) => bucket.id === bucketId)
+    ?? COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS[2];
+}
+
+function getSummaryNumericField(summary, fieldName) {
+  return toFiniteNumber(summary[fieldName]);
 }
 
 function getCalibrationBucket(probability) {
@@ -1455,6 +1526,563 @@ function buildHeadlineFinding(rows) {
     winCount,
     winRate: sampleCount > 0 ? winCount / sampleCount : null,
   };
+}
+
+function computeMean(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function computeSampleVariance(values, mean) {
+  if (!Array.isArray(values) || values.length <= 1 || mean === null) {
+    return 0;
+  }
+
+  return (
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1)
+  );
+}
+
+function buildMeanSummary(values) {
+  const finiteValues = values.filter((value) => value !== null);
+  const mean = computeMean(finiteValues);
+
+  if (mean === null) {
+    return {
+      ciHigh: null,
+      ciLow: null,
+      mean: null,
+      sampleCount: 0,
+      variance: null,
+    };
+  }
+
+  const variance = computeSampleVariance(finiteValues, mean);
+  const standardError =
+    finiteValues.length > 0 ? Math.sqrt(variance / finiteValues.length) : null;
+
+  return {
+    ciHigh:
+      standardError === null
+        ? null
+        : mean + COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    ciLow:
+      standardError === null
+        ? null
+        : mean - COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    mean,
+    sampleCount: finiteValues.length,
+    variance,
+  };
+}
+
+function buildMeanDifferenceSummary(groupA, groupB) {
+  if (groupA.mean === null || groupB.mean === null) {
+    return {
+      ciHigh: null,
+      ciLow: null,
+      mean: null,
+    };
+  }
+
+  const standardError = Math.sqrt(
+    (groupA.variance ?? 0) / Math.max(groupA.sampleCount, 1) +
+      (groupB.variance ?? 0) / Math.max(groupB.sampleCount, 1),
+  );
+  const mean = groupA.mean - groupB.mean;
+
+  return {
+    ciHigh: mean + COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    ciLow: mean - COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    mean,
+  };
+}
+
+function buildWilsonInterval(successCount, sampleCount) {
+  if (!Number.isFinite(sampleCount) || sampleCount <= 0) {
+    return {
+      ciHigh: null,
+      ciLow: null,
+      rate: null,
+      sampleCount: 0,
+      successCount: 0,
+    };
+  }
+
+  const safeSuccessCount = Math.max(
+    0,
+    Math.min(sampleCount, Number(successCount) || 0),
+  );
+  const zSquared = COHORT_HYPOTHESIS_Z_SCORE ** 2;
+  const denominator = 1 + zSquared / sampleCount;
+  const center =
+    (safeSuccessCount / sampleCount + zSquared / (2 * sampleCount)) /
+    denominator;
+  const margin =
+    (COHORT_HYPOTHESIS_Z_SCORE / denominator) *
+    Math.sqrt(
+      (safeSuccessCount / sampleCount) *
+        (1 - safeSuccessCount / sampleCount) /
+        sampleCount +
+        zSquared / (4 * sampleCount ** 2),
+    );
+
+  return {
+    ciHigh: Math.min(1, center + margin),
+    ciLow: Math.max(0, center - margin),
+    rate: safeSuccessCount / sampleCount,
+    sampleCount,
+    successCount: safeSuccessCount,
+  };
+}
+
+function buildRateDifferenceSummary(groupA, groupB) {
+  if (
+    !Number.isFinite(groupA?.sampleCount) ||
+    groupA.sampleCount <= 0 ||
+    !Number.isFinite(groupB?.sampleCount) ||
+    groupB.sampleCount <= 0 ||
+    groupA.rate == null ||
+    groupB.rate == null
+  ) {
+    return {
+      ciHigh: null,
+      ciLow: null,
+      difference: null,
+    };
+  }
+
+  const standardError = Math.sqrt(
+    (groupA.rate * (1 - groupA.rate)) / groupA.sampleCount +
+      (groupB.rate * (1 - groupB.rate)) / groupB.sampleCount,
+  );
+  const difference = groupA.rate - groupB.rate;
+
+  return {
+    ciHigh: difference + COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    ciLow: difference - COHORT_HYPOTHESIS_Z_SCORE * standardError,
+    difference,
+  };
+}
+
+function buildCohortRows(rows, selection) {
+  const checkpointConfig = getCohortCheckpointConfig(selection.checkpoint);
+  const distanceBucket = getCohortDistanceBucket(selection.distanceBucket);
+  const side = selection.side ?? MARKET_OUTCOMES.DOWN;
+  const checkpoint = checkpointConfig.checkpoint;
+
+  return {
+    checkpointConfig,
+    distanceBucket,
+    rows: rows.filter((row) => {
+      const btcDeltaUsd = getBtcDeltaValue(row.summary, checkpoint);
+
+      if (btcDeltaUsd === null) {
+        return false;
+      }
+
+      const absDeltaUsd = Math.abs(btcDeltaUsd);
+      const sideMatches =
+        side === MARKET_OUTCOMES.UP ? btcDeltaUsd >= 0 : btcDeltaUsd < 0;
+
+      if (!sideMatches || absDeltaUsd < distanceBucket.minUsd) {
+        return false;
+      }
+
+      if (distanceBucket.maxUsd == null) {
+        return true;
+      }
+
+      return absDeltaUsd < distanceBucket.maxUsd;
+    }),
+  };
+}
+
+function buildNumericMetricComparison(cohortRows, winningSide, fieldName) {
+  const winnerValues = cohortRows
+    .filter((row) => row.summary.resolvedOutcome === winningSide)
+    .map((row) => getSummaryNumericField(row.summary, fieldName))
+    .filter((value) => value !== null);
+  const loserValues = cohortRows
+    .filter((row) => row.summary.resolvedOutcome !== winningSide)
+    .map((row) => getSummaryNumericField(row.summary, fieldName))
+    .filter((value) => value !== null);
+  const winners = buildMeanSummary(winnerValues);
+  const losers = buildMeanSummary(loserValues);
+
+  return {
+    difference: buildMeanDifferenceSummary(winners, losers),
+    losers,
+    winners,
+  };
+}
+
+function buildCohortSessionRows(cohortRows, winningSide) {
+  return ET_SESSION_BUCKETS.map((session) => {
+    const bucketRows = cohortRows.filter((row) => {
+      const hour = getEtHour(row.summary.windowStartTs);
+
+      return hour != null && hour >= session.startHour && hour <= session.endHour;
+    });
+    const lossCount = bucketRows.filter(
+      (row) => row.summary.resolvedOutcome !== winningSide,
+    ).length;
+
+    return {
+      id: session.id,
+      label: session.label,
+      lossRate: buildWilsonInterval(lossCount, bucketRows.length),
+      loserCount: lossCount,
+      totalCount: bucketRows.length,
+      winnerCount: bucketRows.length - lossCount,
+    };
+  }).filter((row) => row.totalCount > 0);
+}
+
+function buildCohortHourRows(cohortRows, winningSide) {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const hourRows = cohortRows.filter(
+      (row) => getEtHour(row.summary.windowStartTs) === hour,
+    );
+    const lossCount = hourRows.filter(
+      (row) => row.summary.resolvedOutcome !== winningSide,
+    ).length;
+
+    return {
+      hour,
+      label: formatHourLabel(hour),
+      lossRate: buildWilsonInterval(lossCount, hourRows.length),
+      loserCount: lossCount,
+      totalCount: hourRows.length,
+      winnerCount: hourRows.length - lossCount,
+    };
+  }).filter((row) => row.totalCount > 0);
+}
+
+function getHypothesisStatus({
+  ciHigh,
+  ciLow,
+  direction,
+  groupACount,
+  groupBCount,
+}) {
+  if (
+    !Number.isFinite(groupACount) ||
+    groupACount < COHORT_HYPOTHESIS_MIN_GROUP_SIZE ||
+    !Number.isFinite(groupBCount) ||
+    groupBCount < COHORT_HYPOTHESIS_MIN_GROUP_SIZE ||
+    ciLow == null ||
+    ciHigh == null
+  ) {
+    return "underpowered";
+  }
+
+  if (direction === "positive") {
+    return ciLow > 0 ? "supported" : "not_supported";
+  }
+
+  return ciHigh < 0 ? "supported" : "not_supported";
+}
+
+function buildMedianSplitHypothesis({
+  cohortRows,
+  fieldName,
+  id,
+  label,
+  winningSide,
+}) {
+  const values = cohortRows
+    .map((row) => getSummaryNumericField(row.summary, fieldName))
+    .filter((value) => value !== null)
+    .sort((a, b) => a - b);
+  const splitValue = getPercentile(values, 0.5);
+
+  if (splitValue === null) {
+    return {
+      difference: { ciHigh: null, ciLow: null, difference: null },
+      groupA: { ciHigh: null, ciLow: null, rate: null, sampleCount: 0, successCount: 0 },
+      groupALabel: "High",
+      groupB: { ciHigh: null, ciLow: null, rate: null, sampleCount: 0, successCount: 0 },
+      groupBLabel: "Low",
+      id,
+      label,
+      splitValue: null,
+      status: "underpowered",
+    };
+  }
+
+  const highRows = cohortRows.filter(
+    (row) => {
+      const value = getSummaryNumericField(row.summary, fieldName);
+
+      return value !== null && value >= splitValue;
+    },
+  );
+  const lowRows = cohortRows.filter((row) => {
+    const value = getSummaryNumericField(row.summary, fieldName);
+
+    return value !== null && value < splitValue;
+  });
+  const highWinRate = buildWilsonInterval(
+    highRows.filter((row) => row.summary.resolvedOutcome === winningSide).length,
+    highRows.length,
+  );
+  const lowWinRate = buildWilsonInterval(
+    lowRows.filter((row) => row.summary.resolvedOutcome === winningSide).length,
+    lowRows.length,
+  );
+  const difference = buildRateDifferenceSummary(highWinRate, lowWinRate);
+
+  return {
+    difference,
+    groupA: highWinRate,
+    groupALabel: "High",
+    groupB: lowWinRate,
+    groupBLabel: "Low",
+    id,
+    label,
+    splitValue,
+    status: getHypothesisStatus({
+      ciHigh: difference.ciHigh,
+      ciLow: difference.ciLow,
+      direction: "negative",
+      groupACount: highRows.length,
+      groupBCount: lowRows.length,
+    }),
+  };
+}
+
+function buildMomentumHypothesis({
+  cohortRows,
+  fieldName,
+  id,
+  side,
+}) {
+  const positiveRows = cohortRows.filter((row) => {
+    const value = getSummaryNumericField(row.summary, fieldName);
+
+    return value !== null && value > 0;
+  });
+  const flatOrNegativeRows = cohortRows.filter((row) => {
+    const value = getSummaryNumericField(row.summary, fieldName);
+
+    return value !== null && value <= 0;
+  });
+  const positiveWinRate = buildWilsonInterval(
+    positiveRows.filter((row) => row.summary.resolvedOutcome === side).length,
+    positiveRows.length,
+  );
+  const flatOrNegativeWinRate = buildWilsonInterval(
+    flatOrNegativeRows.filter((row) => row.summary.resolvedOutcome === side).length,
+    flatOrNegativeRows.length,
+  );
+  const difference = buildRateDifferenceSummary(
+    positiveWinRate,
+    flatOrNegativeWinRate,
+  );
+  const direction = side === MARKET_OUTCOMES.DOWN ? "negative" : "positive";
+
+  return {
+    difference,
+    groupA: positiveWinRate,
+    groupALabel: "Positive momentum",
+    groupB: flatOrNegativeWinRate,
+    groupBLabel: "Flat or negative momentum",
+    id,
+    label:
+      side === MARKET_OUTCOMES.DOWN
+        ? "Positive momentum into the checkpoint lowers Down reliability."
+        : "Positive momentum into the checkpoint raises Up reliability.",
+    splitValue: 0,
+    status: getHypothesisStatus({
+      ciHigh: difference.ciHigh,
+      ciLow: difference.ciLow,
+      direction,
+      groupACount: positiveRows.length,
+      groupBCount: flatOrNegativeRows.length,
+    }),
+  };
+}
+
+function buildMorningSessionHypothesis({ cohortRows, id, winningSide }) {
+  const morningRows = cohortRows.filter((row) => {
+    const hour = getEtHour(row.summary.windowStartTs);
+
+    return hour != null && hour >= 6 && hour <= 11;
+  });
+  const nonMorningRows = cohortRows.filter((row) => {
+    const hour = getEtHour(row.summary.windowStartTs);
+
+    return hour != null && (hour < 6 || hour > 11);
+  });
+  const morningLossRate = buildWilsonInterval(
+    morningRows.filter((row) => row.summary.resolvedOutcome !== winningSide).length,
+    morningRows.length,
+  );
+  const nonMorningLossRate = buildWilsonInterval(
+    nonMorningRows.filter((row) => row.summary.resolvedOutcome !== winningSide).length,
+    nonMorningRows.length,
+  );
+  const difference = buildRateDifferenceSummary(
+    morningLossRate,
+    nonMorningLossRate,
+  );
+
+  return {
+    difference,
+    groupA: morningLossRate,
+    groupALabel: "Morning ET",
+    groupB: nonMorningLossRate,
+    groupBLabel: "All other sessions",
+    id,
+    label: "Failures cluster in Morning ET more than the rest of the day.",
+    splitValue: null,
+    status: getHypothesisStatus({
+      ciHigh: difference.ciHigh,
+      ciLow: difference.ciLow,
+      direction: "positive",
+      groupACount: morningRows.length,
+      groupBCount: nonMorningRows.length,
+    }),
+  };
+}
+
+function buildCohortHypotheses(cohortRows, checkpointConfig, winningSide) {
+  return [
+    buildMedianSplitHypothesis({
+      cohortRows,
+      fieldName: checkpointConfig.btcPathLengthField,
+      id: "h1",
+      label: "Higher BTC path length before the checkpoint lowers reliability.",
+      winningSide,
+    }),
+    buildMedianSplitHypothesis({
+      cohortRows,
+      fieldName: checkpointConfig.anchorCrossCountField,
+      id: "h2",
+      label: "Higher anchor cross count before the checkpoint lowers reliability.",
+      winningSide,
+    }),
+    buildMomentumHypothesis({
+      cohortRows,
+      fieldName: checkpointConfig.momentumField,
+      id: "h3",
+      side: winningSide,
+    }),
+    buildMorningSessionHypothesis({
+      cohortRows,
+      id: "h4",
+      winningSide,
+    }),
+  ];
+}
+
+function buildCohortDrilldown(rows, selection) {
+  const side = selection.side ?? MARKET_OUTCOMES.DOWN;
+  const { checkpointConfig, distanceBucket, rows: cohortRows } = buildCohortRows(
+    rows,
+    selection,
+  );
+  const winnerRows = cohortRows.filter(
+    (row) => row.summary.resolvedOutcome === side,
+  );
+  const loserRows = cohortRows.filter(
+    (row) => row.summary.resolvedOutcome !== side,
+  );
+  const cohortWinRate = buildWilsonInterval(winnerRows.length, cohortRows.length);
+  const cohortLossRate = buildWilsonInterval(loserRows.length, cohortRows.length);
+  const numericMetrics = [
+    {
+      fieldName: checkpointConfig.btcPathLengthField,
+      format: "btcUsd",
+      id: "btcPathLength",
+      label: "BTC path length to checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.anchorCrossCountField,
+      format: "count",
+      id: "anchorCrossCount",
+      label: "Anchor crossings to checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.momentumField,
+      format: "signedBtcUsd",
+      id: "momentumIntoCheckpoint",
+      label: "Momentum into checkpoint (30s)",
+    },
+    {
+      fieldName: checkpointConfig.btcRangeField,
+      format: "btcUsd",
+      id: "btcRange",
+      label: "BTC range to checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.maxAdverseExcursionField,
+      format: "btcUsd",
+      id: "maxAdverseExcursion",
+      label: "Max adverse excursion after checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.residualPathLengthField,
+      format: "btcUsd",
+      id: "residualPathLength",
+      label: "Residual BTC path length after checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.anchorCrossCountAfterField,
+      format: "count",
+      id: "anchorCrossCountAfter",
+      label: "Anchor crossings after checkpoint",
+    },
+    {
+      fieldName: checkpointConfig.timeOnWinningSideShareAfterField,
+      format: "share",
+      id: "timeOnWinningSideShareAfter",
+      label: "Time on eventual winning side after checkpoint",
+    },
+  ].map((metric) => ({
+    ...metric,
+    ...buildNumericMetricComparison(cohortRows, side, metric.fieldName),
+  }));
+
+  return {
+    checkpoint: checkpointConfig.id,
+    checkpointLabel: checkpointConfig.checkpoint.label,
+    checkpointSecond: checkpointConfig.second,
+    distanceBucketId: distanceBucket.id,
+    distanceBucketLabel: distanceBucket.label,
+    hourRows: buildCohortHourRows(cohortRows, side),
+    hypotheses: buildCohortHypotheses(cohortRows, checkpointConfig, side),
+    lossRate: cohortLossRate,
+    loserCount: loserRows.length,
+    numericMetrics,
+    sampleCount: cohortRows.length,
+    selectionSide: side,
+    sessionRows: buildCohortSessionRows(cohortRows, side),
+    winRate: cohortWinRate,
+    winnerCount: winnerRows.length,
+  };
+}
+
+export function buildCohortDrilldownReport({
+  summaries,
+  markets,
+  filters,
+  selection,
+  nowTs = Date.now(),
+}) {
+  const rows = buildFilteredRows({
+    filters,
+    markets: Array.isArray(markets) ? markets : [],
+    nowTs,
+    summaries: Array.isArray(summaries) ? summaries : [],
+  });
+
+  return buildCohortDrilldown(rows, selection);
 }
 
 export function buildAnalyticsReport({
