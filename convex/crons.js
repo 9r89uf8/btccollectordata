@@ -12,14 +12,14 @@ crons.interval(
 
 crons.interval(
   "reconcile closed polymarket btc 5m markets and finalize summaries",
-  { minutes: 1 },
+  { minutes: 15 },
   internal.internal.finalize.reconcileRecentClosedMarkets,
   { closedLimit: 200, finalizeLimit: 25 },
 );
 
 crons.interval(
   "repair stale active markets and missing summaries",
-  { minutes: 5 },
+  { minutes: 60 },
   internal.internal.repair.reconcileStaleActiveMarketsAndMissingSummaries,
   { missingSummaryLimit: 100, staleLimit: 100 },
 );
