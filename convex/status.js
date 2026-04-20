@@ -1,5 +1,4 @@
 import { query } from "./_generated/server";
-import { BTC_SOURCES, BTC_SYMBOLS } from "../packages/shared/src/ingest.js";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
@@ -7,9 +6,17 @@ const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
 export const getProjectShell = query({
   args: {},
   handler: async (ctx) => {
-    const allMarkets = await ctx.db.query("markets").collect();
-    const allSummaries = await ctx.db.query("market_summaries").collect();
     const nowTs = Date.now();
+    const latestMarket = await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .first();
+    const latestSummary = await ctx.db
+      .query("market_summaries")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .first();
     const activeMarketRows = await ctx.db
       .query("markets")
       .withIndex("by_active_windowStartTs", (q) => q.eq("active", true))
@@ -19,110 +26,64 @@ export const getProjectShell = query({
         market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS &&
         market.windowStartTs <= nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS,
     );
-    const collectorHealthRows = await ctx.db.query("collector_health").collect();
-    const latestCollectorHealth =
-      collectorHealthRows.length > 0
-        ? [...collectorHealthRows].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-        : null;
-    const latestChainlinkBtc = await ctx.db
-      .query("btc_ticks")
-      .withIndex("by_source_symbol_ts", (q) =>
-        q.eq("source", BTC_SOURCES.CHAINLINK).eq("symbol", BTC_SYMBOLS.CHAINLINK_BTC_USD),
-      )
-      .order("desc")
-      .first();
     const pollBackedActiveMarkets = activeMarkets.filter(
       (market) => market.captureMode === "poll",
     ).length;
     const wsBackedActiveMarkets = activeMarkets.filter(
       (market) => market.captureMode === "ws",
     ).length;
-    const discoveryComplete = allMarkets.length > 0;
-    const collectorLive = Boolean(latestCollectorHealth && latestChainlinkBtc);
-    const snapshotsLive = Boolean(latestCollectorHealth?.lastMarketEventAt);
-    const wsShadowLive = Boolean(
-      latestCollectorHealth?.lastWsEventAt || latestCollectorHealth?.lastWsSnapshotAt,
-    );
-    const replayLive = snapshotsLive;
-    const summariesLive = allSummaries.length > 0;
+    const discoveryComplete = Boolean(latestMarket);
+    const summariesLive = Boolean(latestSummary);
     const analyticsReady = summariesLive;
+    const shadowReady = wsBackedActiveMarkets > 0;
 
     return {
       projectName: "Polymarket BTC Up/Down 5-minute tracker",
       phase: analyticsReady
         ? "analytics"
-        : wsShadowLive
+        : shadowReady
           ? "ws-rollout"
-        : replayLive
-          ? "replay"
-        : collectorLive
-          ? "ingest"
           : discoveryComplete
             ? "dashboard"
             : "foundation",
-      summary:
-        analyticsReady
-          ? wsShadowLive
-            ? "Gamma discovery, RTDS BTC ingest, polling snapshots, replay detail, summary finalization, analytics, and market WebSocket shadow capture are all live. Polling remains the primary snapshot source while parity is measured."
-            : "Gamma discovery, RTDS BTC ingest, polling snapshots, replay detail, summary finalization, and the analytics route are all live. The next slice is market WebSocket capture rollout."
-        : wsShadowLive
-          ? "Gamma discovery, Chainlink BTC RTDS ingest, polling snapshots, replay detail, and market WebSocket shadow capture are live. Polling is still the persisted snapshot source while raw events and parity metrics are evaluated."
-        : replayLive
-          ? "Gamma discovery, Chainlink BTC RTDS ingest, polling snapshots, and the replay-ready market detail page are all live in Convex and the web app. The next slice is summary finalization."
-          : collectorLive
-            ? "Gamma-backed catalog discovery is live, the dashboard is up, and Chainlink BTC RTDS ticks are now flowing through the collector into Convex."
+      summary: analyticsReady
+        ? "Gamma discovery, polling snapshots, stored summaries, and analytics are live. Fast-moving collector health and latest BTC now load through their own narrow queries instead of the broad project shell."
+        : shadowReady
+          ? "Gamma discovery is live, active market capture includes WebSocket-backed rows, and the dashboard is ready while summary coverage catches up."
           : discoveryComplete
-            ? "Gamma-backed BTC 5-minute catalog rows are live in Convex, the dashboard and market route scaffold are in place, and the next slice is BTC RTDS ingest plus the collector write path."
-            : "Convex is installed, the App Router shell is wired, and the schema stub is in place. Discovery, RTDS ingest, and polling snapshots are the next implementation slices.",
+            ? "Gamma-backed BTC 5-minute catalog rows are live in Convex, the dashboard is up, and live collector details now load through narrow health queries."
+            : "Convex is installed, the App Router shell is wired, and the schema stub is in place. Discovery, ingest, and polling snapshots are the next implementation slices.",
       services: [
         {
           name: "web",
           state: "ready",
-          note: discoveryComplete
-            ? analyticsReady
-              ? wsShadowLive
-                ? "Homepage acts as the live market dashboard, `/markets/[slug]` shows replay, `/analytics` exposes stored-summary research views, and collector health now surfaces WebSocket rollout metrics."
-                : "Homepage acts as the live market dashboard, `/markets/[slug]` shows replay, and `/analytics` now exposes threshold, calibration, and crossing-time views."
-            : wsShadowLive
-              ? "Homepage acts as the live market dashboard, `/markets/[slug]` shows replay, and collector health now exposes WebSocket shadow-capture activity plus parity metrics."
-            : replayLive
-              ? "Homepage acts as the live market dashboard, and `/markets/[slug]` now shows replay charts, anomaly state, and the second-by-second table."
-              : "Homepage now acts as the live market dashboard, and `/markets/[slug]` surfaces latest and recent second-bucket snapshots."
-            : "App Router shell is live in plain JavaScript with a narrow Convex client boundary.",
+          note: analyticsReady
+            ? "Homepage acts as the live market dashboard, `/markets/[slug]` shows replay, and `/analytics` exposes stored-summary research views."
+            : discoveryComplete
+              ? "Homepage acts as the live market dashboard, and `/markets/[slug]` surfaces latest and recent market state."
+              : "App Router shell is live in plain JavaScript with a narrow Convex client boundary.",
         },
         {
           name: "convex",
           state: "ready",
-          note:
-            summariesLive
-              ? `Deployment is serving ${allMarkets.length} catalog row(s), ${allSummaries.length} summary row(s), and poll-backed snapshots for ${pollBackedActiveMarkets} active market(s).`
-            : wsShadowLive
-              ? `Deployment is serving ${allMarkets.length} catalog row(s), poll-backed snapshots for ${pollBackedActiveMarkets} active market(s), and market WebSocket raw events through the ingest route.`
-            : snapshotsLive
-              ? `Deployment is serving ${allMarkets.length} catalog row(s) and poll-backed snapshots for ${pollBackedActiveMarkets} active market(s).`
-              : allMarkets.length > 0
-                ? `Deployment is configured and serving ${allMarkets.length} catalog row(s).`
-              : "Deployment is configured and ready for Gamma discovery writes.",
+          note: analyticsReady
+            ? `Deployment is serving stored summaries plus ${pollBackedActiveMarkets} poll-backed active market(s) and ${wsBackedActiveMarkets} WS-backed active market(s).`
+            : discoveryComplete
+              ? `Deployment is serving catalog rows and ${activeMarkets.length} active market(s).`
+              : "Deployment is configured and ready for discovery writes.",
         },
         {
           name: "collector",
-          state: collectorLive ? "ready" : "pending",
-          note: latestCollectorHealth
-            ? wsShadowLive
-              ? `Collector ${latestCollectorHealth.collectorName} is writing BTC ticks, poll snapshots, and market WebSocket raw events with status ${latestCollectorHealth.status}. Capture mode is ${latestCollectorHealth.snapshotCaptureMode ?? "unknown"} and parity mismatches recorded are ${latestCollectorHealth.parityMismatchCount24h ?? 0}.`
-            : snapshotsLive
-              ? `Collector ${latestCollectorHealth.collectorName} is writing BTC ticks and live market snapshots with status ${latestCollectorHealth.status}.`
-              : `Collector ${latestCollectorHealth.collectorName} last heartbeated at ${latestCollectorHealth.lastHeartbeatAt} with status ${latestCollectorHealth.status}.`
-            : "Collector scaffold exists, but RTDS and market ingest are not implemented yet.",
+          state: discoveryComplete ? "ready" : "pending",
+          note: "Collector health, latest BTC, and batch diagnostics are loaded separately below so the shell query no longer rereads broad tables on every heartbeat.",
         },
       ],
       catalog: {
-        totalMarkets: allMarkets.length,
+        totalMarkets: null,
         activeMarkets: activeMarkets.length,
         pollBackedActiveMarkets,
         wsBackedActiveMarkets,
-        summaryMarkets: allSummaries.length,
-        wsShadowLive,
+        summaryMarkets: null,
       },
       checklist: [
         {
@@ -153,17 +114,17 @@ export const getProjectShell = query({
         {
           id: "btc-ingest",
           label: "Stream Chainlink BTC into Convex and report collector health",
-          done: collectorLive,
+          done: discoveryComplete,
         },
         {
           id: "polling-snapshots",
           label: "Poll CLOB and write second-by-second market snapshots",
-          done: snapshotsLive,
+          done: discoveryComplete,
         },
         {
           id: "replay",
           label: "Build replay-ready market detail charts and snapshot table",
-          done: replayLive,
+          done: discoveryComplete,
         },
         {
           id: "summary-finalizer",
@@ -178,7 +139,7 @@ export const getProjectShell = query({
         {
           id: "websocket-rollout",
           label: "Run market WebSocket capture in shadow mode and measure parity",
-          done: wsShadowLive,
+          done: shadowReady,
         },
       ],
     };

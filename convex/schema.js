@@ -257,5 +257,7 @@ export default defineSchema({
     partialPollCount24h: optionalNullable(v.number()),
     lastError: nullable(v.string()),
     updatedAt: v.number(),
-  }).index("by_collectorName", ["collectorName"]),
+  })
+    .index("by_collectorName", ["collectorName"])
+    .index("by_updatedAt", ["updatedAt"]),
 });

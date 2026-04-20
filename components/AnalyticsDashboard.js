@@ -532,11 +532,11 @@ export default function AnalyticsDashboard() {
   });
   const deferredFilters = useDeferredValue(filters);
   const deferredCohortSelection = useDeferredValue(cohortSelection);
-  const analytics = useQuery(api.analytics.getDashboard, deferredFilters);
-  const cohortDrilldown = useQuery(api.analytics.getCohortDrilldown, {
+  const pageData = useQuery(api.analytics.getPageData, {
     checkpoint: deferredCohortSelection.checkpoint,
     dateRange: deferredFilters.dateRange,
     distanceBucket: deferredCohortSelection.distanceBucket,
+    minSampleSize: deferredFilters.minSampleSize,
     quality: deferredFilters.quality,
     side: deferredCohortSelection.side,
   });
@@ -559,9 +559,12 @@ export default function AnalyticsDashboard() {
     });
   }
 
-  if (analytics === undefined) {
+  if (pageData === undefined) {
     return <LoadingState />;
   }
+
+  const analytics = pageData?.dashboard;
+  const cohortDrilldown = pageData?.cohortDrilldown;
 
   const {
     boundaryMoveBuckets = [],
@@ -596,7 +599,7 @@ export default function AnalyticsDashboard() {
     headlineFinding = EMPTY_HEADLINE_FINDING,
     overview = EMPTY_OVERVIEW,
     thresholdStats = [],
-  } = analytics;
+  } = analytics ?? {};
   const activeCohortDrilldown =
     cohortDrilldown === undefined ? EMPTY_COHORT_DRILLDOWN : cohortDrilldown;
   const {

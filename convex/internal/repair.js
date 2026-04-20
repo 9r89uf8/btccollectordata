@@ -92,23 +92,64 @@ export const listMissingSummarySlugs = internalQuery({
     );
     const limit = Math.max(1, Math.min(args.limit ?? 100, 200));
     const nowTs = Date.now();
-    const [markets, summaryRows] = await Promise.all([
-      ctx.db.query("markets").collect(),
-      ctx.db.query("market_summaries").collect(),
-    ]);
-    const summarySlugs = new Set(summaryRows.map((summary) => summary.marketSlug));
+    const pageSize = Math.min(200, Math.max(limit * 2, 50));
+    const missingSummarySlugs = [];
+    let cursorWindowEndTs = nowTs;
 
-    return markets
-      .filter((market) =>
-        shouldFinalizeMissingSummary(market, {
-          graceMs,
-          hasSummary: summarySlugs.has(market.slug),
-          nowTs,
-        }),
-      )
-      .sort((a, b) => b.windowEndTs - a.windowEndTs)
-      .slice(0, limit)
-      .map((market) => market.slug);
+    while (missingSummarySlugs.length < limit) {
+      const page = await ctx.db
+        .query("markets")
+        .withIndex("by_windowEndTs", (q) => q.lte("windowEndTs", cursorWindowEndTs))
+        .order("desc")
+        .take(pageSize);
+
+      if (page.length === 0) {
+        break;
+      }
+
+      for (const market of page) {
+        if (
+          !shouldFinalizeMissingSummary(market, {
+            graceMs,
+            hasSummary: false,
+            nowTs,
+          })
+        ) {
+          continue;
+        }
+
+        const existingSummary = await ctx.db
+          .query("market_summaries")
+          .withIndex("by_marketSlug", (q) => q.eq("marketSlug", market.slug))
+          .unique();
+
+        if (
+          shouldFinalizeMissingSummary(market, {
+            graceMs,
+            hasSummary: Boolean(existingSummary),
+            nowTs,
+          })
+        ) {
+          missingSummarySlugs.push(market.slug);
+        }
+
+        if (missingSummarySlugs.length >= limit) {
+          break;
+        }
+      }
+
+      if (page.length < pageSize) {
+        break;
+      }
+
+      cursorWindowEndTs = page[page.length - 1].windowEndTs - 1;
+
+      if (cursorWindowEndTs < 0) {
+        break;
+      }
+    }
+
+    return missingSummarySlugs;
   },
 });
 

@@ -15,12 +15,10 @@ export const getCollectorHealth = query({
       return health ?? null;
     }
 
-    const rows = await ctx.db.query("collector_health").collect();
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    return [...rows].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return await ctx.db
+      .query("collector_health")
+      .withIndex("by_updatedAt")
+      .order("desc")
+      .first();
   },
 });

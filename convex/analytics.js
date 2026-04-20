@@ -107,6 +107,60 @@ export const getDashboard = query({
   },
 });
 
+export const getPageData = query({
+  args: {
+    checkpoint: cohortCheckpointValue,
+    dateRange: v.optional(analyticsDateRangeValue),
+    distanceBucket: cohortDistanceBucketValue,
+    minSampleSize: v.optional(v.number()),
+    quality: v.optional(
+      v.union(
+        v.literal("all"),
+        v.literal("good"),
+        v.literal("partial"),
+        v.literal("gap"),
+      ),
+    ),
+    side: cohortSideValue,
+  },
+  handler: async (ctx, args) => {
+    const nowTs = Date.now();
+    const dateRange = args.dateRange ?? "7d";
+    const quality = args.quality ?? "all";
+    const summaries = await listCandidateSummaries(ctx, dateRange, nowTs);
+    const markets = await listMarketsForSummaries(ctx, summaries);
+    const defaultMinSampleSize = ANALYTICS_MIN_SAMPLE_OPTIONS.includes(3) ? 3 : 1;
+    const minSampleSize = Math.max(1, args.minSampleSize ?? defaultMinSampleSize);
+
+    return {
+      cohortDrilldown: buildCohortDrilldownReport({
+        filters: {
+          dateRange,
+          quality,
+        },
+        markets,
+        nowTs,
+        selection: {
+          checkpoint: args.checkpoint,
+          distanceBucket: args.distanceBucket,
+          side: args.side,
+        },
+        summaries,
+      }),
+      dashboard: buildAnalyticsReport({
+        filters: {
+          dateRange,
+          minSampleSize,
+          quality,
+        },
+        markets,
+        nowTs,
+        summaries,
+      }),
+    };
+  },
+});
+
 export const getCohortDrilldown = query({
   args: {
     checkpoint: cohortCheckpointValue,

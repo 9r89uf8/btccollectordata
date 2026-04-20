@@ -57,6 +57,14 @@ function formatDuration(ms) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function formatShellCount(value) {
+  if (!Number.isFinite(value)) {
+    return "available";
+  }
+
+  return String(value);
+}
+
 export default function ProjectStatusPanel() {
   const shell = useQuery(api.status.getProjectShell);
   const latestBtc = useQuery(api.btc.getLatestChainlinkBtc);
@@ -114,10 +122,10 @@ export default function ProjectStatusPanel() {
 
       <div className="mt-6 flex flex-wrap gap-3 text-sm text-stone-700">
         <span className="rounded-full border border-black/10 bg-white px-4 py-2">
-          Catalog markets: <strong>{shell.catalog.totalMarkets}</strong>
+          Catalog markets: <strong>{formatShellCount(shell.catalog.totalMarkets)}</strong>
         </span>
         <span className="rounded-full border border-black/10 bg-white px-4 py-2">
-          Active markets: <strong>{shell.catalog.activeMarkets}</strong>
+          Active markets: <strong>{formatShellCount(shell.catalog.activeMarkets)}</strong>
         </span>
       </div>
 
