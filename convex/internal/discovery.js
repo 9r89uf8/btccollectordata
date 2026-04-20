@@ -274,29 +274,29 @@ async function findExistingMarket(ctx, market) {
   const bySlug = await ctx.db
     .query("markets")
     .withIndex("by_slug", (q) => q.eq("slug", market.slug))
-    .collect();
+    .first();
 
-  if (bySlug[0]) {
-    return bySlug[0];
+  if (bySlug) {
+    return bySlug;
   }
 
   const byMarketId = await ctx.db
     .query("markets")
     .withIndex("by_marketId", (q) => q.eq("marketId", market.marketId))
-    .collect();
+    .first();
 
-  if (byMarketId[0]) {
-    return byMarketId[0];
+  if (byMarketId) {
+    return byMarketId;
   }
 
   if (market.conditionId) {
     const byConditionId = await ctx.db
       .query("markets")
       .withIndex("by_conditionId", (q) => q.eq("conditionId", market.conditionId))
-      .collect();
+      .first();
 
-    if (byConditionId[0]) {
-      return byConditionId[0];
+    if (byConditionId) {
+      return byConditionId;
     }
   }
 

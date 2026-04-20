@@ -66,6 +66,11 @@ export default defineSchema({
     .index("by_windowStartTs", ["windowStartTs"])
     .index("by_windowEndTs", ["windowEndTs"])
     .index("by_active_windowStartTs", ["active", "windowStartTs"])
+    .index("by_active_priceToBeatDerived_windowStartTs", [
+      "active",
+      "priceToBeatDerived",
+      "windowStartTs",
+    ])
     .index("by_resolved_windowEndTs", ["resolved", "windowEndTs"]),
 
   market_events_raw: defineTable({

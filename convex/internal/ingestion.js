@@ -296,7 +296,7 @@ export const insertBtcTicks = internalMutation({
         tick.source === BTC_SOURCES.CHAINLINK &&
         tick.symbol === BTC_SYMBOLS.CHAINLINK_BTC_USD,
     );
-    const startReferenceSync = hasChainlinkTicks
+    const startReferenceSync = inserted > 0 && hasChainlinkTicks
       ? await syncActiveMarketStartReferences(ctx, { nowTs })
       : { scanned: 0, updated: 0 };
 

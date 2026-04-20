@@ -102,12 +102,35 @@ export async function syncActiveMarketStartReferences(
   },
 ) {
   const lowerBoundTs = nowTs - lookbackMs;
-  const markets = await ctx.db
-    .query("markets")
-    .withIndex("by_active_windowStartTs", (q) =>
-      q.eq("active", true).gte("windowStartTs", lowerBoundTs).lte("windowStartTs", nowTs),
-    )
-    .collect();
+  const [missingReferenceMarkets, justStartedMarkets] = await Promise.all([
+    ctx.db
+      .query("markets")
+      .withIndex("by_active_priceToBeatDerived_windowStartTs", (q) =>
+        q
+          .eq("active", true)
+          .eq("priceToBeatDerived", null)
+          .gte("windowStartTs", lowerBoundTs)
+          .lte("windowStartTs", nowTs),
+      )
+      .collect(),
+    ctx.db
+      .query("markets")
+      .withIndex("by_active_windowStartTs", (q) =>
+        q
+          .eq("active", true)
+          .gte("windowStartTs", nowTs - maxDistanceMs)
+          .lte("windowStartTs", nowTs),
+      )
+      .collect(),
+  ]);
+  const markets = [
+    ...new Map(
+      [...missingReferenceMarkets, ...justStartedMarkets].map((market) => [
+        market._id,
+        market,
+      ]),
+    ).values(),
+  ];
 
   let updated = 0;
 
