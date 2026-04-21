@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "convex/react";
+import { useEffect, useState } from "react";
 
 import ReplayLineChart from "@/components/charts/ReplayLineChart";
 import { buildReplayTimeline } from "@/components/marketReplay.mjs";
@@ -107,6 +108,18 @@ function formatSignalQuality(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatRemainingDuration(remainingMs) {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return "ended";
+  }
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function formatSamplingCadence(cadenceMs) {
   if (!Number.isFinite(cadenceMs) || cadenceMs <= 0) {
     return "pending";
@@ -208,6 +221,37 @@ function buildChartMarkers(market) {
     label: marker.label,
     secondBucket: market.windowStartTs + marker.second * 1000,
   }));
+}
+
+function LiveRemainingCard({ windowEndTs }) {
+  const [nowTs, setNowTs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const remainingMs =
+    Number.isFinite(windowEndTs) && Number.isFinite(nowTs)
+      ? Math.max(0, windowEndTs - nowTs)
+      : null;
+
+  return (
+    <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
+        Live remaining
+      </p>
+      <p className="mt-2 text-lg font-semibold text-stone-950">
+        {formatRemainingDuration(remainingMs)}
+      </p>
+      <p className="mt-1 text-xs text-stone-500">
+        Closes {formatEtDateTime(windowEndTs)}
+      </p>
+    </div>
+  );
 }
 
 function EvaluationCard({ evaluation, matchedRule }) {
@@ -331,7 +375,7 @@ function MarketSignalCard({ rules, signal }) {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-3 lg:grid-cols-5">
+      <div className="mt-6 grid gap-3 lg:grid-cols-6">
         <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
             Window
@@ -381,6 +425,7 @@ function MarketSignalCard({ rules, signal }) {
             {formatCount(signal.liveSnapshotsLoaded)} live buckets loaded
           </p>
         </div>
+        <LiveRemainingCard windowEndTs={signal.market.windowEndTs} />
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
