@@ -133,6 +133,7 @@ export default function ReplayLineChart({
   eyebrow,
   formatAxisValue,
   formatSecondaryAxisValue = null,
+  markers = [],
   sampleCadenceMs = 1000,
   secondaryYDomain = null,
   secondaryYTicks = [],
@@ -183,6 +184,17 @@ export default function ReplayLineChart({
       Math.max(secondaryDomainMax - secondaryDomainMin, 0.000001)) *
       plotHeight;
   const phaseBands = buildPhaseBands(timeline, sampleCadenceMs, getX, plotHeight, top);
+  const visibleMarkers = markers
+    .filter(
+      (marker) =>
+        Number.isFinite(marker?.secondBucket) &&
+        marker.secondBucket >= bucketMin &&
+        marker.secondBucket <= bucketMax,
+    )
+    .map((marker) => ({
+      ...marker,
+      x: getX(marker.secondBucket),
+    }));
   const qualityBarY = top + plotHeight + 14;
 
   return (
@@ -309,6 +321,44 @@ export default function ReplayLineChart({
                 />
               )),
           )}
+
+          {visibleMarkers.map((marker) => {
+            const textAnchor =
+              marker.x < left + 40
+                ? "start"
+                : marker.x > width - right - 40
+                  ? "end"
+                  : "middle";
+            const textX =
+              textAnchor === "start"
+                ? marker.x + 6
+                : textAnchor === "end"
+                  ? marker.x - 6
+                  : marker.x;
+
+            return (
+              <g key={marker.key ?? `${marker.label}-${marker.secondBucket}`}>
+                <line
+                  x1={marker.x}
+                  x2={marker.x}
+                  y1={top}
+                  y2={qualityBarY + qualityHeight}
+                  stroke={marker.color ?? "rgba(15, 23, 42, 0.3)"}
+                  strokeDasharray="6 6"
+                />
+                <text
+                  x={textX}
+                  y={top + 14}
+                  fill={marker.color ?? "#0f172a"}
+                  fontSize="11"
+                  fontWeight="600"
+                  textAnchor={textAnchor}
+                >
+                  {marker.label}
+                </text>
+              </g>
+            );
+          })}
 
           {tickIndices.map((index) => (
             <g key={index}>

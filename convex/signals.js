@@ -66,6 +66,28 @@ async function listMarketsForSummaries(ctx, summaries) {
   return markets.filter(Boolean);
 }
 
+function selectCurrentLiveMarket(markets, nowTs) {
+  const liveNow = markets
+    .filter(
+      (market) => market.windowStartTs <= nowTs && nowTs < market.windowEndTs,
+    )
+    .sort((a, b) => b.windowStartTs - a.windowStartTs);
+
+  if (liveNow.length > 0) {
+    return liveNow[0];
+  }
+
+  const inGraceWindow = markets
+    .filter(
+      (market) =>
+        market.windowStartTs <= nowTs &&
+        nowTs < market.windowEndTs + ACTIVE_WINDOW_GRACE_MS,
+    )
+    .sort((a, b) => b.windowEndTs - a.windowEndTs);
+
+  return inGraceWindow[0] ?? null;
+}
+
 export const getLiveCallRules = query({
   args: {
     dateRange: v.optional(analyticsDateRangeValue),
@@ -107,27 +129,28 @@ export const getActiveLiveSignals = query({
       .query("markets")
       .withIndex("by_active_windowStartTs", (q) => q.eq("active", true))
       .collect();
-    const liveMarkets = activeMarkets
-      .filter(
-        (market) =>
-          market.windowStartTs <= nowTs &&
-          nowTs < market.windowEndTs + ACTIVE_WINDOW_GRACE_MS,
-      )
-      .sort((a, b) => a.windowStartTs - b.windowStartTs);
-    const snapshotsBySlug = new Map();
+    const currentMarket = selectCurrentLiveMarket(activeMarkets, nowTs);
 
-    for (const market of liveMarkets) {
-      const snapshots = await ctx.db
-        .query("market_snapshots_1s")
-        .withIndex("by_marketSlug_ts", (q) => q.eq("marketSlug", market.slug))
-        .collect();
-      snapshotsBySlug.set(market.slug, snapshots);
+    if (!currentMarket) {
+      return null;
     }
 
-    return buildLiveMarketSignalReport({
-      markets: liveMarkets,
+    const snapshots = await ctx.db
+      .query("market_snapshots_1s")
+      .withIndex("by_marketSlug_ts", (q) => q.eq("marketSlug", currentMarket.slug))
+      .collect();
+    const snapshotsBySlug = new Map([[currentMarket.slug, snapshots]]);
+    const [signal] = buildLiveMarketSignalReport({
+      markets: [currentMarket],
       nowTs,
       snapshotsBySlug,
     });
+
+    return signal
+      ? {
+          signal,
+          snapshots,
+        }
+      : null;
   },
 });

@@ -455,6 +455,7 @@ export function buildLiveMarketSignalReport({ markets, nowTs, snapshotsBySlug })
           active: market.active,
           captureMode: market.captureMode,
           dataQuality: market.dataQuality,
+          marketId: market.marketId ?? null,
           outcomeLabels: market.outcomeLabels,
           priceToBeatDerived: market.priceToBeatDerived,
           priceToBeatOfficial: market.priceToBeatOfficial,

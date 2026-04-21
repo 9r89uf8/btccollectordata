@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useQuery } from "convex/react";
 
+import ReplayLineChart from "@/components/charts/ReplayLineChart";
+import { buildReplayTimeline } from "@/components/marketReplay.mjs";
 import { api } from "@/convex/_generated/api";
 import {
   buildLiveCall,
@@ -17,6 +19,14 @@ import {
   formatProbability,
   getToneClasses,
 } from "@/components/marketFormat";
+
+const LIVE_CHART_MARKERS = [
+  { id: "t60", label: "T+60", second: 60 },
+  { id: "t120", label: "T+120", second: 120 },
+  { id: "t180", label: "T+180", second: 180 },
+  { id: "t240", label: "T+240", second: 240 },
+  { id: "t295", label: "T+295", second: 295 },
+];
 
 function LoadingState() {
   return (
@@ -97,6 +107,18 @@ function formatSignalQuality(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatSamplingCadence(cadenceMs) {
+  if (!Number.isFinite(cadenceMs) || cadenceMs <= 0) {
+    return "pending";
+  }
+
+  if (cadenceMs % 1000 === 0) {
+    return `${cadenceMs / 1000}s`;
+  }
+
+  return `${(cadenceMs / 1000).toFixed(1)}s`;
+}
+
 function getCallTone(status) {
   if (status === "up") {
     return "emerald";
@@ -129,6 +151,63 @@ function formatRuleRead(rule) {
   return `${rule.checkpointLabel}, ${rule.side === "up" ? "Up" : "Down"} ${rule.distanceBucketLabel}, ${rule.qualityBucketLabel}. Historical win rate ${formatProbability(
     rule.winRate,
   )} on ${formatCount(rule.sampleCount)} markets.`;
+}
+
+function buildAxisTicks(domain, count = 4) {
+  const [min, max] = domain;
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return [0, 1];
+  }
+
+  if (min === max) {
+    return [min];
+  }
+
+  const ticks = [];
+
+  for (let index = 0; index < count; index += 1) {
+    ticks.push(min + ((max - min) * index) / Math.max(count - 1, 1));
+  }
+
+  return ticks;
+}
+
+function getBtcDomain(timeline, anchorPrice) {
+  const btcValues = timeline
+    .map((item) => item.btcChainlink)
+    .filter((value) => value != null);
+
+  if (anchorPrice != null) {
+    btcValues.push(anchorPrice);
+  }
+
+  if (btcValues.length === 0) {
+    return [0, 1];
+  }
+
+  const min = Math.min(...btcValues);
+  const max = Math.max(...btcValues);
+
+  if (min === max) {
+    const padding = Math.max(10, Math.abs(min) * 0.001);
+    return [min - padding, max + padding];
+  }
+
+  const padding = Math.max((max - min) * 0.08, 8);
+  return [min - padding, max + padding];
+}
+
+function buildChartMarkers(market) {
+  if (!market?.windowStartTs) {
+    return [];
+  }
+
+  return LIVE_CHART_MARKERS.map((marker) => ({
+    key: marker.id,
+    label: marker.label,
+    secondBucket: market.windowStartTs + marker.second * 1000,
+  }));
 }
 
 function EvaluationCard({ evaluation, matchedRule }) {
@@ -235,7 +314,7 @@ function MarketSignalCard({ rules, signal }) {
             <Pill tone="stone">{signal.market.dataQuality}</Pill>
           </div>
           <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-            {signal.market.slug}
+            Current market
           </p>
           <h3 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
             {signal.market.question}
@@ -252,7 +331,7 @@ function MarketSignalCard({ rules, signal }) {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-3 lg:grid-cols-4">
+      <div className="mt-6 grid gap-3 lg:grid-cols-5">
         <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
             Window
@@ -289,6 +368,17 @@ function MarketSignalCard({ rules, signal }) {
           </p>
           <p className="text-sm leading-7 text-stone-700">
             Down {formatProbability(signal.currentDownDisplayed)}
+          </p>
+        </div>
+        <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
+            Snapshot quality
+          </p>
+          <p className="mt-2 text-sm leading-7 text-stone-700">
+            {signal.currentSnapshotQuality ?? "pending"}
+          </p>
+          <p className="text-xs text-stone-500">
+            {formatCount(signal.liveSnapshotsLoaded)} live buckets loaded
           </p>
         </div>
       </div>
@@ -340,13 +430,26 @@ export default function LiveSignalsDashboard() {
     dateRange: LIVE_CALL_RULE_DATE_RANGE,
     quality: "all",
   });
-  const liveSignals = useQuery(api.signals.getActiveLiveSignals, {});
+  const liveSignalResponse = useQuery(api.signals.getActiveLiveSignals, {});
 
-  if (rulesResponse === undefined || liveSignals === undefined) {
+  if (rulesResponse === undefined || liveSignalResponse === undefined) {
     return <LoadingState />;
   }
 
   const rules = rulesResponse?.rules ?? [];
+  const signal = liveSignalResponse?.signal ?? null;
+  const replaySnapshots = liveSignalResponse?.snapshots ?? [];
+
+  const replay = signal ? buildReplayTimeline(signal.market, replaySnapshots) : null;
+  const cadenceMs = replay?.cadenceMs ?? 1000;
+  const timeline = replay?.timeline ?? [];
+  const chartMarkers = signal ? buildChartMarkers(signal.market) : [];
+  const btcTimeline = timeline.map((item) => ({
+    ...item,
+    anchorPrice: signal?.anchorPrice ?? null,
+  }));
+  const btcDomain = getBtcDomain(timeline, signal?.anchorPrice ?? null);
+  const btcTicks = buildAxisTicks(btcDomain, 4);
 
   return (
     <section className="space-y-6">
@@ -373,32 +476,86 @@ export default function LiveSignalsDashboard() {
           Live checklist
         </p>
         <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-stone-950">
-          Call the market from BTC state, not just the displayed percentage
+          Call the current market from BTC state, not just the displayed percentage
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-700">
-          The page waits for the latest completed checkpoint, maps BTC distance
-          from the anchor plus path quality into the historically strong rule
-          table, and returns <strong>Call Up</strong>, <strong>Call Down</strong>,
-          or <strong>No clear call</strong>. Price is shown for context, but the
-          primary output is directional correctness.
+          The page scores a single current BTC 5-minute market, waits for the
+          latest completed checkpoint, maps BTC distance from the anchor plus
+          path quality into the historically strong rule table, and returns{" "}
+          <strong>Call Up</strong>, <strong>Call Down</strong>, or{" "}
+          <strong>No clear call</strong>. The charts below keep BTC, the price
+          to beat, and the live Up / Down prices on the same checkpoint labels.
         </p>
       </article>
 
-      {liveSignals.length === 0 ? (
+      {!signal ? (
         <EmptyState
-          title="No live markets"
+          title="No live market"
           message="No active BTC 5-minute market is currently inside its live window, so the checklist has nothing to score."
         />
       ) : (
-        <div className="space-y-6">
-          {liveSignals.map((signal) => (
-            <MarketSignalCard
-              key={signal.market.slug}
-              rules={rules}
-              signal={signal}
-            />
-          ))}
-        </div>
+        <>
+          <MarketSignalCard rules={rules} signal={signal} />
+
+          <ReplayLineChart
+            description={`This chart follows the current ${formatSamplingCadence(
+              cadenceMs,
+            )} replay buckets for the live market. The blue line is observed Chainlink BTC, the amber line is the price to beat, and the dashed markers label the live checkpoints directly on the chart.`}
+            emptyMessage="No BTC-linked snapshots have been written for this market yet."
+            eyebrow="BTC state"
+            formatAxisValue={(tick) =>
+              new Intl.NumberFormat("en-US", {
+                maximumFractionDigits: 0,
+              }).format(tick)
+            }
+            markers={chartMarkers}
+            sampleCadenceMs={cadenceMs}
+            series={[
+              {
+                color: "#1d4ed8",
+                key: "btcChainlink",
+                label: "Chainlink BTC",
+              },
+              {
+                color: "#d97706",
+                dashArray: "8 6",
+                key: "anchorPrice",
+                label: "Price to beat",
+              },
+            ]}
+            timeline={btcTimeline}
+            title="BTC price vs. price to beat"
+            yDomain={btcDomain}
+            yTicks={btcTicks}
+          />
+
+          <ReplayLineChart
+            description={`Up and Down displayed prices stay on the same ${formatSamplingCadence(
+              cadenceMs,
+            )} replay buckets as BTC so you can compare market pricing against the checkpoint labels without leaving the page.`}
+            emptyMessage="No displayed-price snapshots have been written for this market yet."
+            eyebrow="Market price"
+            formatAxisValue={(tick) => formatProbability(tick)}
+            markers={chartMarkers}
+            sampleCadenceMs={cadenceMs}
+            series={[
+              {
+                color: "#0f766e",
+                key: "upDisplayed",
+                label: signal.market.outcomeLabels.upLabel,
+              },
+              {
+                color: "#be185d",
+                key: "downDisplayed",
+                label: signal.market.outcomeLabels.downLabel,
+              },
+            ]}
+            timeline={timeline}
+            title="Displayed Up / Down price over time"
+            yDomain={[0, 1]}
+            yTicks={[0, 0.25, 0.5, 0.75, 1]}
+          />
+        </>
       )}
 
       <article className="rounded-[1.45rem] border border-black/10 bg-white/85 p-6 shadow-[0_14px_40px_rgba(30,30,30,0.05)]">
