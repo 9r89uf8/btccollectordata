@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/btcgt.iml" filepath="$PROJECT_DIR$/.idea/btcgt.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../nextaifg2026/.idea/nextaifg2026.iml" filepath="$PROJECT_DIR$/../nextaifg2026/.idea/nextaifg2026.iml" />
     </modules>
   </component>
 </project>

@@ -33,6 +33,9 @@ export default function SiteHeader({ current = "/" }) {
           <NavLink href="/" current={current}>
             Dashboard
           </NavLink>
+          <NavLink href="/signals" current={current}>
+            Signals
+          </NavLink>
           <NavLink href="/markets" current={current}>
             Markets
           </NavLink>

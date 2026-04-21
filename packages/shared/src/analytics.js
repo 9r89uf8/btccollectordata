@@ -1,4 +1,8 @@
 import { DATA_QUALITY, MARKET_OUTCOMES } from "./market.js";
+import {
+  LIVE_CALL_RULE_MIN_SAMPLE_SIZE,
+  LIVE_CALL_RULE_MIN_WIN_RATE,
+} from "./liveSignals.js";
 
 export const ANALYTICS_CHECKPOINTS = [
   {
@@ -2376,6 +2380,57 @@ export function buildCohortDrilldownReport({
   });
 
   return buildCohortDrilldown(rows, selection);
+}
+
+export function buildLiveCallRulesReport({
+  summaries,
+  markets,
+  filters = {},
+  nowTs = Date.now(),
+}) {
+  const effectiveMinSampleSize = Math.max(
+    Number(filters.minSampleSize) || LIVE_CALL_RULE_MIN_SAMPLE_SIZE,
+    LIVE_CALL_RULE_MIN_SAMPLE_SIZE,
+  );
+  const effectiveMinWinRate = Math.max(
+    Number(filters.minWinRate) || LIVE_CALL_RULE_MIN_WIN_RATE,
+    LIVE_CALL_RULE_MIN_WIN_RATE,
+  );
+  const rows = buildFilteredRows({
+    filters: {
+      dateRange: filters.dateRange ?? "7d",
+      quality: filters.quality ?? "all",
+    },
+    markets: Array.isArray(markets) ? markets : [],
+    nowTs,
+    summaries: Array.isArray(summaries) ? summaries : [],
+  });
+
+  return {
+    appliedFilters: {
+      dateRange: filters.dateRange ?? "7d",
+      minSampleSize: effectiveMinSampleSize,
+      minWinRate: effectiveMinWinRate,
+      quality: filters.quality ?? "all",
+    },
+    rules: buildBtcSignalQualityEdgeRows(rows, effectiveMinSampleSize)
+      .filter((row) => (row.winRate ?? -Infinity) >= effectiveMinWinRate)
+      .sort((a, b) => {
+        const checkpointDelta = a.checkpointSecond - b.checkpointSecond;
+
+        if (checkpointDelta !== 0) {
+          return checkpointDelta;
+        }
+
+        const winRateDelta = (b.winRate ?? -Infinity) - (a.winRate ?? -Infinity);
+
+        if (winRateDelta !== 0) {
+          return winRateDelta;
+        }
+
+        return b.sampleCount - a.sampleCount;
+      }),
+  };
 }
 
 export function buildAnalyticsReport({

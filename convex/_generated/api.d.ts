@@ -21,6 +21,7 @@ import type * as internal_health from "../internal/health.js";
 import type * as internal_ingestion from "../internal/ingestion.js";
 import type * as internal_repair from "../internal/repair.js";
 import type * as markets from "../markets.js";
+import type * as signals from "../signals.js";
 import type * as snapshots from "../snapshots.js";
 import type * as status from "../status.js";
 import type * as summaries from "../summaries.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   "internal/ingestion": typeof internal_ingestion;
   "internal/repair": typeof internal_repair;
   markets: typeof markets;
+  signals: typeof signals;
   snapshots: typeof snapshots;
   status: typeof status;
   summaries: typeof summaries;
