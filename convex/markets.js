@@ -45,14 +45,14 @@ export const listActiveBtc5m = query({
     const nowTs = Date.now();
     const markets = await ctx.db
       .query("markets")
-      .withIndex("by_active_windowStartTs", (q) => q.eq("active", true))
+      .withIndex("by_active_windowStartTs", (q) =>
+        q.eq("active", true).lte("windowStartTs", nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS),
+      )
       .collect();
 
     return sortActiveMarkets(
       markets.filter(
-        (market) =>
-          market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS &&
-          market.windowStartTs <= nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS,
+        (market) => market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS,
       ),
       nowTs,
     );

@@ -631,16 +631,17 @@ export const markEndedMarketsInactive = internalMutation({
   },
   handler: async (ctx, args) => {
     const seenSlugs = new Set(args.seenSlugs);
+    const endedBeforeTs = args.nowTs - 60_000;
     const activeMarkets = await ctx.db
       .query("markets")
-      .withIndex("by_active_windowStartTs", (q) => q.eq("active", true))
+      .withIndex("by_active_windowEndTs", (q) =>
+        q.eq("active", true).lte("windowEndTs", endedBeforeTs),
+      )
       .collect();
     let deactivated = 0;
 
     for (const market of activeMarkets) {
-      const clearlyEnded = market.windowEndTs <= args.nowTs - 60_000;
-
-      if (seenSlugs.has(market.slug) || !clearlyEnded) {
+      if (seenSlugs.has(market.slug)) {
         continue;
       }
 

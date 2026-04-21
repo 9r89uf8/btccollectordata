@@ -5,9 +5,9 @@ const crons = cronJobs();
 
 crons.interval(
   "discover active polymarket btc 5m markets",
-  { seconds: 15 },
+  { seconds: 60 },
   internal.internal.discovery.syncActiveBtc5mMarkets,
-  { limit: 200, maxPages: 10 },
+  { limit: 50, maxPages: 2 },
 );
 
 crons.interval(

@@ -104,6 +104,27 @@ function formatRemainingDuration(remainingMs) {
   };
 }
 
+function formatTickAge(ageMs) {
+  if (!Number.isFinite(ageMs)) {
+    return "age pending";
+  }
+
+  if (ageMs < 1000) {
+    return "just now";
+  }
+
+  const seconds = Math.round(ageMs / 1000);
+
+  if (seconds < 60) {
+    return `${seconds}s old`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+
+  return `${minutes}m ${remainingSeconds}s old`;
+}
+
 function formatSamplingCadence(cadenceMs) {
   if (!Number.isFinite(cadenceMs) || cadenceMs <= 0) {
     return "pending";
@@ -579,10 +600,23 @@ function EvaluationGrid({ rules, signal }) {
   );
 }
 
-function LiveMarketHero({ rules, signal, timeline, cadenceMs }) {
+function LiveMarketHero({ latestBtcTick, rules, signal, timeline, cadenceMs }) {
   const call = buildLiveCall(signal, rules);
   const activeEvaluation = call.activeEvaluation;
   const matchedRule = call.matchedRule;
+  const latestTickPrice = Number.isFinite(latestBtcTick?.price)
+    ? latestBtcTick.price
+    : null;
+  const displayedCurrentBtcPrice = latestTickPrice ?? signal.currentBtcPrice;
+  const displayedCurrentDelta =
+    displayedCurrentBtcPrice != null && signal.anchorPrice != null
+      ? displayedCurrentBtcPrice - signal.anchorPrice
+      : null;
+  const currentPriceSource = latestTickPrice != null
+    ? `${latestBtcTick?.stale ? "Stale " : ""}Chainlink tick, ${formatTickAge(
+        latestBtcTick?.ageMs,
+      )}`
+    : `Snapshot bucket, ${formatSamplingCadence(cadenceMs)} cadence`;
   const chartMarkers = buildChartMarkers(signal.market);
   const btcTimeline = timeline.map((item) => ({
     ...item,
@@ -639,22 +673,25 @@ function LiveMarketHero({ rules, signal, timeline, cadenceMs }) {
             Current Price{" "}
             <span
               className={
-                signal.currentDeltaFromAnchorUsd == null
+                displayedCurrentDelta == null
                   ? "text-stone-400"
-                  : signal.currentDeltaFromAnchorUsd >= 0
+                  : displayedCurrentDelta >= 0
                     ? "text-emerald-500"
                     : "text-rose-500"
               }
             >
-              {signal.currentDeltaFromAnchorUsd == null
+              {displayedCurrentDelta == null
                 ? ""
-                : `${signal.currentDeltaFromAnchorUsd >= 0 ? "▲" : "▼"} ${formatSignedBtcDelta(
-                    signal.currentDeltaFromAnchorUsd,
+                : `${displayedCurrentDelta >= 0 ? "▲" : "▼"} ${formatSignedBtcDelta(
+                    displayedCurrentDelta,
                   )}`}
             </span>
           </p>
           <p className="mt-2 text-[2.15rem] font-semibold tracking-[-0.05em] text-[#f7931a]">
-            {formatBtcUsd(signal.currentBtcPrice)}
+            {formatBtcUsd(displayedCurrentBtcPrice)}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-stone-500">
+            {currentPriceSource}
           </p>
         </div>
 
@@ -742,6 +779,7 @@ export default function LiveSignalsDashboard() {
     quality: "all",
   });
   const liveSignalResponse = useQuery(api.signals.getActiveLiveSignals, {});
+  const latestBtcTickResponse = useQuery(api.btc.getLatestChainlinkBtc, {});
 
   if (rulesResponse === undefined || liveSignalResponse === undefined) {
     return <LoadingState />;
@@ -749,6 +787,7 @@ export default function LiveSignalsDashboard() {
 
   const rules = rulesResponse?.rules ?? [];
   const signal = liveSignalResponse?.signal ?? null;
+  const latestBtcTick = latestBtcTickResponse ?? null;
   const replaySnapshots = liveSignalResponse?.snapshots ?? [];
   const replay = signal ? buildReplayTimeline(signal.market, replaySnapshots) : null;
   const cadenceMs = replay?.cadenceMs ?? 1000;
@@ -764,6 +803,7 @@ export default function LiveSignalsDashboard() {
       ) : (
         <>
           <LiveMarketHero
+            latestBtcTick={latestBtcTick}
             rules={rules}
             signal={signal}
             timeline={timeline}
