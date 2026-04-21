@@ -626,87 +626,86 @@ function LiveMarketHero({ rules, signal, timeline, cadenceMs }) {
         </div>
       </div>
 
-      <div className="mt-7 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
-            <p className="text-sm font-semibold text-slate-500">Price To Beat</p>
-            <p className="mt-2 text-[2.15rem] font-semibold tracking-[-0.05em] text-slate-500">
-              {formatBtcUsd(signal.anchorPrice)}
-            </p>
-          </div>
-
-          <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
-            <p className="text-sm font-semibold text-[#f7931a]">
-              Current Price{" "}
-              <span
-                className={
-                  signal.currentDeltaFromAnchorUsd == null
-                    ? "text-stone-400"
-                    : signal.currentDeltaFromAnchorUsd >= 0
-                      ? "text-emerald-500"
-                      : "text-rose-500"
-                }
-              >
-                {signal.currentDeltaFromAnchorUsd == null
-                  ? ""
-                  : `${signal.currentDeltaFromAnchorUsd >= 0 ? "▲" : "▼"} ${formatSignedBtcDelta(
-                      signal.currentDeltaFromAnchorUsd,
-                    )}`}
-              </span>
-            </p>
-            <p className="mt-2 text-[2.15rem] font-semibold tracking-[-0.05em] text-[#f7931a]">
-              {formatBtcUsd(signal.currentBtcPrice)}
-            </p>
-          </div>
-
-          <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
-            <p className="text-sm font-semibold text-slate-500">Current Market Price</p>
-            <div className="mt-2 space-y-1 text-lg font-semibold tracking-[-0.04em] text-stone-950">
-              <p>Up {formatProbability(signal.currentUpDisplayed)}</p>
-              <p>Down {formatProbability(signal.currentDownDisplayed)}</p>
-            </div>
-          </div>
-
-          <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
-            <p className="text-sm font-semibold text-slate-500">Live read</p>
-            <p className="mt-2 text-xl font-semibold tracking-[-0.04em] text-stone-950">
-              {activeEvaluation?.ready
-                ? `${activeEvaluation.checkpointLabel} ${activeEvaluation.side === "up" ? "Up" : "Down"}`
-                : "Waiting"}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-stone-500">
-              Latest observed {signal.latestSnapshotTs ? formatEtDateTime(signal.latestSnapshotTs) : "pending"} at {formatSamplingCadence(cadenceMs)} cadence.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <SignalStripChart
-            anchorValue={signal.anchorPrice}
-            axisFormatter={(tick) =>
-              new Intl.NumberFormat("en-US", {
-                maximumFractionDigits: 0,
-              }).format(tick)
-            }
-            markers={chartMarkers}
-            series={[
-              {
-                color: "#f7931a",
-                key: "btcChainlink",
-              },
-            ]}
-            timeline={btcTimeline}
-            title="BTC"
-            yDomain={btcDomain}
-          />
-          <p className="text-sm leading-7 text-stone-700">
-            {matchedRule
-              ? `Historical match: ${matchedRule.checkpointLabel}, ${matchedRule.side === "up" ? "Up" : "Down"} ${matchedRule.distanceBucketLabel}, ${matchedRule.qualityBucketLabel}. That setup won ${formatProbability(
-                  matchedRule.winRate,
-                )} across ${formatCount(matchedRule.sampleCount)} markets.`
-              : call.reason}
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
+          <p className="text-sm font-semibold text-slate-500">Price To Beat</p>
+          <p className="mt-2 text-[2.15rem] font-semibold tracking-[-0.05em] text-slate-500">
+            {formatBtcUsd(signal.anchorPrice)}
           </p>
         </div>
+
+        <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
+          <p className="text-sm font-semibold text-[#f7931a]">
+            Current Price{" "}
+            <span
+              className={
+                signal.currentDeltaFromAnchorUsd == null
+                  ? "text-stone-400"
+                  : signal.currentDeltaFromAnchorUsd >= 0
+                    ? "text-emerald-500"
+                    : "text-rose-500"
+              }
+            >
+              {signal.currentDeltaFromAnchorUsd == null
+                ? ""
+                : `${signal.currentDeltaFromAnchorUsd >= 0 ? "▲" : "▼"} ${formatSignedBtcDelta(
+                    signal.currentDeltaFromAnchorUsd,
+                  )}`}
+            </span>
+          </p>
+          <p className="mt-2 text-[2.15rem] font-semibold tracking-[-0.05em] text-[#f7931a]">
+            {formatBtcUsd(signal.currentBtcPrice)}
+          </p>
+        </div>
+
+        <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
+          <p className="text-sm font-semibold text-slate-500">Current Market Price</p>
+          <div className="mt-2 space-y-1 text-lg font-semibold tracking-[-0.04em] text-stone-950">
+            <p>Up {formatProbability(signal.currentUpDisplayed)}</p>
+            <p>Down {formatProbability(signal.currentDownDisplayed)}</p>
+          </div>
+        </div>
+
+        <div className="rounded-[1.25rem] bg-white px-5 py-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]">
+          <p className="text-sm font-semibold text-slate-500">Live read</p>
+          <p className="mt-2 text-xl font-semibold tracking-[-0.04em] text-stone-950">
+            {activeEvaluation?.ready
+              ? `${activeEvaluation.checkpointLabel} ${activeEvaluation.side === "up" ? "Up" : "Down"}`
+              : "Waiting"}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-stone-500">
+            Latest observed {signal.latestSnapshotTs ? formatEtDateTime(signal.latestSnapshotTs) : "pending"} at {formatSamplingCadence(cadenceMs)} cadence.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-4">
+        <SignalStripChart
+          anchorValue={signal.anchorPrice}
+          axisFormatter={(tick) =>
+            new Intl.NumberFormat("en-US", {
+              maximumFractionDigits: 0,
+            }).format(tick)
+          }
+          height={340}
+          markers={chartMarkers}
+          series={[
+            {
+              color: "#f7931a",
+              key: "btcChainlink",
+            },
+          ]}
+          timeline={btcTimeline}
+          title="BTC"
+          yDomain={btcDomain}
+        />
+        <p className="text-sm leading-7 text-stone-700">
+          {matchedRule
+            ? `Historical match: ${matchedRule.checkpointLabel}, ${matchedRule.side === "up" ? "Up" : "Down"} ${matchedRule.distanceBucketLabel}, ${matchedRule.qualityBucketLabel}. That setup won ${formatProbability(
+                matchedRule.winRate,
+              )} across ${formatCount(matchedRule.sampleCount)} markets.`
+            : call.reason}
+        </p>
       </div>
 
       <div className="mt-6">
@@ -716,7 +715,7 @@ function LiveMarketHero({ rules, signal, timeline, cadenceMs }) {
       <div className="mt-6">
         <SignalStripChart
           axisFormatter={(tick) => formatProbability(tick)}
-          height={220}
+          height={260}
           markers={chartMarkers}
           series={[
             {
