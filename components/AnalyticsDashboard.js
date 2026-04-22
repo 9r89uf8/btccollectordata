@@ -582,7 +582,7 @@ export default function AnalyticsDashboard() {
     btcSignalQualityEdgeCards = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
     btcSignalQualityEdgeMinSamples = 40,
     btcCandidateRules = EMPTY_BTC_CANDIDATE_RULE_ROWS,
-    btcCandidateRulesMinEdge = 0.03,
+    btcCandidateRulesHoldoutShare = 0.3,
     btcCandidateRulesMinSamples = 40,
     btcCandidateRulesMinWinRate = 0.7,
     btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
@@ -1007,13 +1007,13 @@ export default function AnalyticsDashboard() {
 
             <div className="space-y-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                BTC signal vs market price edge
+                Price-edge context
               </p>
               <p className="max-w-3xl text-sm leading-7 text-stone-700">
-                This compares the historical win rate for a BTC-distance bucket
-                against the average market price for that same side. Positive edge
-                means the market underpriced the signal on average; negative edge
-                means it overpriced it.
+                Secondary read: this compares the historical win rate for a
+                BTC-distance bucket against the average market price for that
+                same side. It is useful for value/execution questions, but the
+                accuracy-first rule ranking below does not require positive edge.
               </p>
               <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
                 {btcMarketEdgeCards.map((card) => (
@@ -1652,19 +1652,21 @@ export default function AnalyticsDashboard() {
       </TableShell>
 
       <TableShell
-        caption="Candidate rules"
-        title="Shortlist of BTC setups that look both strong and mispriced"
+        caption="Accuracy-first rules"
+        title="Rule ranking by win rate, support, coverage, and time left"
       >
         <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This filters the signal-quality rows down to the setups that clear all
-          three gates at once: support of at least{" "}
-          {formatCount(btcCandidateRulesMinSamples)} samples, realized win rate of
-          at least {formatProbability(btcCandidateRulesMinWinRate)}, and positive
-          edge of at least {formatCalibrationGap(btcCandidateRulesMinEdge)}.
+          This is the accuracy-first shortlist for live calls. It ignores price
+          edge as a gate and keeps only BTC distance + signal-quality setups with
+          at least {formatCount(btcCandidateRulesMinSamples)} samples and realized
+          win rate of at least {formatProbability(btcCandidateRulesMinWinRate)}.
+          Coverage is the share of filtered markets matching the rule, and the
+          recent holdout uses the newest {formatProbability(btcCandidateRulesHoldoutShare)}
+          of matching rows as a sanity check.
         </p>
 
         {btcCandidateRules.length === 0 ? (
-          <EmptyTable message="No signal-quality rows currently clear the candidate-rule floor." />
+          <EmptyTable message="No signal-quality rows currently clear the accuracy-first rule floor." />
         ) : (
           <div className="overflow-auto rounded-[1.2rem] border border-black/10">
             <table className="min-w-full text-left text-sm text-stone-700">
@@ -1675,10 +1677,11 @@ export default function AnalyticsDashboard() {
                   <th className="px-4 py-3 font-semibold">Distance bucket</th>
                   <th className="px-4 py-3 font-semibold">Quality bucket</th>
                   <th className="px-4 py-3 font-semibold">Samples</th>
+                  <th className="px-4 py-3 font-semibold">Coverage</th>
                   <th className="px-4 py-3 font-semibold">Avg quality</th>
-                  <th className="px-4 py-3 font-semibold">Avg market price</th>
                   <th className="px-4 py-3 font-semibold">Win rate</th>
-                  <th className="px-4 py-3 font-semibold">Edge</th>
+                  <th className="px-4 py-3 font-semibold">Recent holdout</th>
+                  <th className="px-4 py-3 font-semibold">Time left</th>
                 </tr>
               </thead>
               <tbody>
@@ -1694,14 +1697,25 @@ export default function AnalyticsDashboard() {
                     <td className="px-4 py-3">{row.distanceBucketLabel}</td>
                     <td className="px-4 py-3">{row.qualityBucketLabel}</td>
                     <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
+                    <td className="px-4 py-3">{formatProbability(row.coverageShare)}</td>
                     <td className="px-4 py-3">
                       {formatSignalQualityScore(row.averageSignalQualityScore)}
                     </td>
-                    <td className="px-4 py-3">
-                      {formatProbability(row.averageDisplayedProbability)}
-                    </td>
                     <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                    <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
+                    <td className="px-4 py-3">
+                      <div className="space-y-1">
+                        <p className="font-medium text-stone-950">
+                          {formatProbability(row.holdoutWinRate)}
+                        </p>
+                        <p className="text-xs text-stone-500">
+                          {formatCount(row.holdoutWinCount)} /{" "}
+                          {formatCount(row.holdoutSampleCount)} newest
+                        </p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {formatOffsetClock(row.timeLeftSeconds)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1712,13 +1726,14 @@ export default function AnalyticsDashboard() {
 
       <TableShell
         caption="Signal quality"
-        title="BTC signal quality vs market edge"
+        title="BTC signal quality with price-edge context"
       >
         <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
           This layer asks whether the BTC signal was not just large, but also
           clean relative to the path BTC took into the checkpoint. Signal
           quality is `abs(delta from anchor) / BTC path length to checkpoint`,
-          so higher values mean more net movement and less churn.
+          so higher values mean more net movement and less churn. The edge
+          columns here are secondary pricing context, not the live-call gate.
         </p>
 
         <div className="space-y-4">

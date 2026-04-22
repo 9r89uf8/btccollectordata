@@ -1465,43 +1465,68 @@ test("buildAnalyticsReport splits BTC market edge rows by normalized signal qual
   );
   assert.equal(result.btcCandidateRulesMinSamples, 40);
   assert.equal(result.btcCandidateRulesMinWinRate, 0.7);
-  assert.equal(result.btcCandidateRulesMinEdge, 0.03);
+  assert.equal(result.btcCandidateRulesHoldoutShare, 0.3);
   assert.deepEqual(
     result.btcCandidateRules.map((row) => ({
       checkpointSecond: row.checkpointSecond,
       distanceBucketLabel: row.distanceBucketLabel,
+      holdoutSampleCount: row.holdoutSampleCount,
+      holdoutWinCount: row.holdoutWinCount,
       qualityBucketLabel: row.qualityBucketLabel,
       sampleCount: row.sampleCount,
       side: row.side,
+      timeLeftSeconds: row.timeLeftSeconds,
     })),
     [
       {
-        checkpointSecond: 60,
-        distanceBucketLabel: "$20-$29.99",
+        checkpointSecond: 120,
+        distanceBucketLabel: "$50+",
+        holdoutSampleCount: 15,
+        holdoutWinCount: 10,
         qualityBucketLabel: "0.35+ (clean)",
-        sampleCount: 44,
+        sampleCount: 48,
         side: MARKET_OUTCOMES.UP,
+        timeLeftSeconds: 180,
       },
       {
         checkpointSecond: 120,
         distanceBucketLabel: "$50+",
+        holdoutSampleCount: 14,
+        holdoutWinCount: 8,
         qualityBucketLabel: "0.35+ (clean)",
-        sampleCount: 48,
+        sampleCount: 46,
+        side: MARKET_OUTCOMES.DOWN,
+        timeLeftSeconds: 180,
+      },
+      {
+        checkpointSecond: 60,
+        distanceBucketLabel: "$20-$29.99",
+        holdoutSampleCount: 14,
+        holdoutWinCount: 4,
+        qualityBucketLabel: "0.35+ (clean)",
+        sampleCount: 44,
         side: MARKET_OUTCOMES.UP,
+        timeLeftSeconds: 240,
       },
       {
         checkpointSecond: 60,
         distanceBucketLabel: "$30-$49.99",
+        holdoutSampleCount: 14,
+        holdoutWinCount: 2,
         qualityBucketLabel: "0.35+ (clean)",
         sampleCount: 45,
         side: MARKET_OUTCOMES.DOWN,
+        timeLeftSeconds: 240,
       },
       {
         checkpointSecond: 120,
         distanceBucketLabel: "$50+",
-        qualityBucketLabel: "0.35+ (clean)",
-        sampleCount: 46,
-        side: MARKET_OUTCOMES.DOWN,
+        holdoutSampleCount: 15,
+        holdoutWinCount: 2,
+        qualityBucketLabel: "0.20-0.34 (mixed)",
+        sampleCount: 48,
+        side: MARKET_OUTCOMES.UP,
+        timeLeftSeconds: 180,
       },
     ],
   );

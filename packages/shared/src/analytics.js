@@ -183,7 +183,7 @@ const BTC_WINNING_SIDE_CHECKPOINTS = [
 ];
 const BTC_WINNING_SIDE_HEADLINE_SECOND = 120;
 const BTC_BEST_SIGNAL_MIN_SAMPLES = 40;
-const BTC_CANDIDATE_RULE_MIN_EDGE = 0.03;
+const BTC_CANDIDATE_RULE_HOLDOUT_SHARE = 0.3;
 const BTC_CANDIDATE_RULE_MIN_WIN_RATE = 0.7;
 const BTC_BEST_SIGNAL_TARGETS = [
   {
@@ -1368,10 +1368,6 @@ function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
         btcDeltaUsd >= 0 ? MARKET_OUTCOMES.UP : MARKET_OUTCOMES.DOWN;
       const displayedProbability = getSideProbability(row.summary, checkpoint, side);
 
-      if (displayedProbability === null) {
-        continue;
-      }
-
       for (const distanceBucket of BTC_CONDITIONAL_RELIABILITY_BUCKETS) {
         const absDeltaUsd = Math.abs(btcDeltaUsd);
 
@@ -1399,6 +1395,7 @@ function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
           const aggregate = aggregates.get(key) ?? {
             averageDeltaTotal: 0,
             averageDisplayedTotal: 0,
+            displayedSampleCount: 0,
             averageSignalQualityTotal: 0,
             checkpoint: checkpoint.id,
             checkpointLabel: checkpoint.label,
@@ -1417,7 +1414,10 @@ function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
           };
 
           aggregate.averageDeltaTotal += btcDeltaUsd;
-          aggregate.averageDisplayedTotal += displayedProbability;
+          if (displayedProbability !== null) {
+            aggregate.averageDisplayedTotal += displayedProbability;
+            aggregate.displayedSampleCount += 1;
+          }
           aggregate.averageSignalQualityTotal += signalQualityScore;
           aggregate.sampleCount += 1;
           aggregate.winCount += row.summary.resolvedOutcome === side ? 1 : 0;
@@ -1435,8 +1435,8 @@ function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
           ? aggregate.winCount / aggregate.sampleCount
           : null;
       const averageDisplayedProbability =
-        aggregate.sampleCount > 0
-          ? aggregate.averageDisplayedTotal / aggregate.sampleCount
+        aggregate.displayedSampleCount > 0
+          ? aggregate.averageDisplayedTotal / aggregate.displayedSampleCount
           : null;
 
       return {
@@ -1460,6 +1460,7 @@ function buildBtcSignalQualityEdgeRows(rows, minSampleSize) {
         distanceBucketLabel: aggregate.distanceBucketLabel,
         distanceMaxUsd: aggregate.distanceMaxUsd,
         distanceMinUsd: aggregate.distanceMinUsd,
+        displayedSampleCount: aggregate.displayedSampleCount,
         qualityBucketId: aggregate.qualityBucketId,
         qualityBucketLabel: aggregate.qualityBucketLabel,
         qualityMax: aggregate.qualityMax,
@@ -1558,35 +1559,125 @@ function buildBtcSignalQualityEdgeCards(rows, minSampleSize) {
   };
 }
 
+function getRowsMatchingSignalQualityRule(rows, rule) {
+  const checkpoint = ANALYTICS_CHECKPOINTS.find(
+    (item) => item.id === rule.checkpoint,
+  );
+
+  if (!checkpoint) {
+    return [];
+  }
+
+  return rows.filter((row) => {
+    const btcDeltaUsd = getBtcDeltaValue(row.summary, checkpoint);
+    const signalQualityScore = getBtcSignalQualityScore(row.summary, checkpoint);
+
+    if (btcDeltaUsd === null || signalQualityScore === null) {
+      return false;
+    }
+
+    const side = btcDeltaUsd >= 0 ? MARKET_OUTCOMES.UP : MARKET_OUTCOMES.DOWN;
+
+    if (side !== rule.side) {
+      return false;
+    }
+
+    const absDeltaUsd = Math.abs(btcDeltaUsd);
+
+    if (absDeltaUsd < rule.distanceMinUsd) {
+      return false;
+    }
+
+    if (rule.distanceMaxUsd !== null && absDeltaUsd >= rule.distanceMaxUsd) {
+      return false;
+    }
+
+    if (signalQualityScore < rule.qualityMin) {
+      return false;
+    }
+
+    if (rule.qualityMax !== null && signalQualityScore >= rule.qualityMax) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function buildRecentHoldoutForRule(rows, rule) {
+  const matchingRows = getRowsMatchingSignalQualityRule(rows, rule);
+
+  if (matchingRows.length === 0) {
+    return {
+      holdoutSampleCount: 0,
+      holdoutShare: BTC_CANDIDATE_RULE_HOLDOUT_SHARE,
+      holdoutWinCount: 0,
+      holdoutWinRate: null,
+    };
+  }
+
+  const sortedRows = sortRowsByWindow(matchingRows);
+  const holdoutSampleCount = Math.max(
+    1,
+    Math.ceil(sortedRows.length * BTC_CANDIDATE_RULE_HOLDOUT_SHARE),
+  );
+  const holdoutRows = sortedRows.slice(-holdoutSampleCount);
+  const holdoutWinCount = holdoutRows.filter(
+    (row) => row.summary.resolvedOutcome === rule.side,
+  ).length;
+
+  return {
+    holdoutSampleCount,
+    holdoutShare: BTC_CANDIDATE_RULE_HOLDOUT_SHARE,
+    holdoutWinCount,
+    holdoutWinRate:
+      holdoutSampleCount > 0 ? holdoutWinCount / holdoutSampleCount : null,
+  };
+}
+
 function buildBtcCandidateRules(rows, minSampleSize) {
   const effectiveMinSampleSize = Math.max(
     minSampleSize,
     BTC_BEST_SIGNAL_MIN_SAMPLES,
   );
+  const totalSampleCount = rows.length;
   const candidateRows = buildBtcSignalQualityEdgeRows(rows, effectiveMinSampleSize)
     .filter(
       (row) =>
-        (row.averageEdge ?? -Infinity) >= BTC_CANDIDATE_RULE_MIN_EDGE &&
         (row.winRate ?? -Infinity) >= BTC_CANDIDATE_RULE_MIN_WIN_RATE,
     )
+    .map((row) => ({
+      ...row,
+      ...buildRecentHoldoutForRule(rows, row),
+      coverageShare:
+        totalSampleCount > 0 ? row.sampleCount / totalSampleCount : null,
+      timeLeftSeconds: Math.max(0, 300 - row.checkpointSecond),
+    }))
     .sort((a, b) => {
-      const edgeDelta = (b.averageEdge ?? -Infinity) - (a.averageEdge ?? -Infinity);
-
-      if (edgeDelta !== 0) {
-        return edgeDelta;
-      }
-
       const winRateDelta = (b.winRate ?? -Infinity) - (a.winRate ?? -Infinity);
 
       if (winRateDelta !== 0) {
         return winRateDelta;
       }
 
-      return b.sampleCount - a.sampleCount;
+      const holdoutDelta =
+        (b.holdoutWinRate ?? -Infinity) - (a.holdoutWinRate ?? -Infinity);
+
+      if (holdoutDelta !== 0) {
+        return holdoutDelta;
+      }
+
+      const sampleDelta = b.sampleCount - a.sampleCount;
+
+      if (sampleDelta !== 0) {
+        return sampleDelta;
+      }
+
+      return b.timeLeftSeconds - a.timeLeftSeconds;
     });
 
   return {
-    minEdge: BTC_CANDIDATE_RULE_MIN_EDGE,
+    holdoutShare: BTC_CANDIDATE_RULE_HOLDOUT_SHARE,
     minSampleSize: effectiveMinSampleSize,
     minWinRate: BTC_CANDIDATE_RULE_MIN_WIN_RATE,
     rows: candidateRows,
@@ -2413,23 +2504,9 @@ export function buildLiveCallRulesReport({
       minWinRate: effectiveMinWinRate,
       quality: filters.quality ?? "all",
     },
-    rules: buildBtcSignalQualityEdgeRows(rows, effectiveMinSampleSize)
-      .filter((row) => (row.winRate ?? -Infinity) >= effectiveMinWinRate)
-      .sort((a, b) => {
-        const checkpointDelta = a.checkpointSecond - b.checkpointSecond;
-
-        if (checkpointDelta !== 0) {
-          return checkpointDelta;
-        }
-
-        const winRateDelta = (b.winRate ?? -Infinity) - (a.winRate ?? -Infinity);
-
-        if (winRateDelta !== 0) {
-          return winRateDelta;
-        }
-
-        return b.sampleCount - a.sampleCount;
-      }),
+    rules: buildBtcCandidateRules(rows, effectiveMinSampleSize).rows.filter(
+      (row) => (row.winRate ?? -Infinity) >= effectiveMinWinRate,
+    ),
   };
 }
 
@@ -2478,7 +2555,7 @@ export function buildAnalyticsReport({
     btcSignalQualityEdgeCards: btcSignalQualityEdge.cards,
     btcSignalQualityEdgeMinSamples: btcSignalQualityEdge.minSampleSize,
     btcCandidateRules: btcCandidateRules.rows,
-    btcCandidateRulesMinEdge: btcCandidateRules.minEdge,
+    btcCandidateRulesHoldoutShare: btcCandidateRules.holdoutShare,
     btcCandidateRulesMinSamples: btcCandidateRules.minSampleSize,
     btcCandidateRulesMinWinRate: btcCandidateRules.minWinRate,
     btcWinningSideCadenceMix: buildBtcWinningSideCadenceMix(rows),

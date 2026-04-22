@@ -104,6 +104,12 @@ function formatRemainingDuration(remainingMs) {
   };
 }
 
+function formatSecondsClock(seconds) {
+  const duration = formatRemainingDuration(seconds * 1000);
+
+  return `${duration.minutes}:${duration.seconds}`;
+}
+
 function formatTickAge(ageMs) {
   if (!Number.isFinite(ageMs)) {
     return "age pending";
@@ -818,7 +824,7 @@ export default function LiveSignalsDashboard() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-stone-500">
-              Historical rule table
+              Accuracy-first rule table
             </p>
             <h3 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
               Setups that currently qualify for the live checklist
@@ -845,7 +851,9 @@ export default function LiveSignalsDashboard() {
                   <th className="px-4 py-3 font-semibold">Distance bucket</th>
                   <th className="px-4 py-3 font-semibold">Quality bucket</th>
                   <th className="px-4 py-3 font-semibold">Samples</th>
+                  <th className="px-4 py-3 font-semibold">Coverage</th>
                   <th className="px-4 py-3 font-semibold">Win rate</th>
+                  <th className="px-4 py-3 font-semibold">Time left</th>
                 </tr>
               </thead>
               <tbody>
@@ -863,7 +871,9 @@ export default function LiveSignalsDashboard() {
                     <td className="px-4 py-3">{rule.distanceBucketLabel}</td>
                     <td className="px-4 py-3">{rule.qualityBucketLabel}</td>
                     <td className="px-4 py-3">{formatCount(rule.sampleCount)}</td>
+                    <td className="px-4 py-3">{formatProbability(rule.coverageShare)}</td>
                     <td className="px-4 py-3">{formatProbability(rule.winRate)}</td>
+                    <td className="px-4 py-3">{formatSecondsClock(rule.timeLeftSeconds)}</td>
                   </tr>
                 ))}
               </tbody>
