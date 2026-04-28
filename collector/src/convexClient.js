@@ -17,10 +17,10 @@ export function createIngestClient(config) {
     async sendBatch(batch) {
       const sentAt = Number.isFinite(batch.sentAt) ? batch.sentAt : Date.now();
       const body = JSON.stringify({
+        ...batch,
         secret: config.ingestSharedSecret,
         collectorName: config.collectorName,
         sentAt,
-        ...batch,
       });
 
       if (body.length > INGEST_MAX_BYTES) {
@@ -56,6 +56,12 @@ export function createQueryClient(config) {
 
   return {
     client,
+    async getDecisionPriors() {
+      return await client.query("decisionPriors:getLatest", {});
+    },
+    async getDecisionRuntimeFlags() {
+      return await client.query("runtimeFlags:getDecisionRuntimeFlags", {});
+    },
     async listActiveMarkets() {
       return await client.query("markets:listActiveBtc5m", {});
     },

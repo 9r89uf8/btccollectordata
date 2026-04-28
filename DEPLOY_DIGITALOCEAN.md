@@ -107,8 +107,24 @@ Recommended production defaults in that file already include:
 - `PERSIST_MARKET_RAW_EVENTS=false`
 - `CLOB_REQUEST_TIMEOUT_MS=2500`
 - `CLOB_MAX_ATTEMPTS=2`
+- `ENABLE_DECISION_ENGINE=false`
+- `DECISION_PERSIST_OFF_CHECKPOINT_WAITS=false`
 
 Those settings keep storage lower and make poll overruns less likely on a 5-second cadence.
+
+For shadow decision logging, set the collector process flag:
+
+```txt
+ENABLE_DECISION_ENGINE=true
+DECISION_PRIORS_REFRESH_MS=1800000
+DECISION_BANKROLL=1.0
+DECISION_REQUIRE_OFFICIAL_PRICE_TO_BEAT=true
+DECISION_PERSIST_OFF_CHECKPOINT_WAITS=false
+DECISION_RUNTIME_FLAGS_REFRESH_MS=5000
+```
+
+The collector process flag is only the first layer. Convex runtime flags must
+also be enabled before decision rows are emitted.
 
 ## 7. Install The systemd Service
 
@@ -140,6 +156,19 @@ npm ci
 sudo systemctl restart btcgt-collector
 ```
 
+If the update includes decision engine or decision UI backend changes, update
+Convex functions before restarting the Droplet collector. Then keep the runtime
+flags in shadow mode:
+
+```bash
+npx convex run internal/runtimeFlags:ensureDecisionRuntimeFlagDefaults '{}'
+npx convex run internal/runtimeFlags:setDecisionRuntimeFlag '{"key":"decision_engine_enabled","value":true}'
+npx convex run internal/runtimeFlags:setDecisionRuntimeFlag '{"key":"decision_emit_actions","value":"wait_only"}'
+```
+
+With `decision_emit_actions=wait_only`, would-have-entered rows are persisted as
+`WAIT` with `actionPreMute=ENTER_UP` or `actionPreMute=ENTER_DOWN`.
+
 ## 9. Deploy The Web App Separately
 
 If you deploy the Next.js app on Vercel, set:
@@ -158,6 +187,9 @@ After the collector is running, confirm in the UI:
 - collector health is `ok`
 - last poll status is visible
 - poll overrun / poll failure / partial poll counters move only occasionally
+- `/decisions` shows recent decision rows after target checkpoints close
+- strict policy produces mostly or entirely `WAIT` rows, not an empty dashboard
+- muted ENTER candidates appear in `/decisions` without reading collector logs
 
 If poll overruns climb quickly, tighten:
 

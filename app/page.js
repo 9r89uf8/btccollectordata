@@ -35,9 +35,6 @@ export default function Home() {
               Summary finalizer
             </span>
             <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
-              Analytics
-            </span>
-            <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
               Market WS shadow
             </span>
           </div>
@@ -46,7 +43,7 @@ export default function Home() {
               Polymarket BTC Up/Down 5m
             </p>
             <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
-              Discovery, replay, analytics, and WS shadow capture are now live.
+              Discovery, replay, summaries, and WS shadow capture are now live.
             </h1>
             <p className="max-w-2xl text-base leading-7 text-stone-700 sm:text-lg">
               Active BTC 5-minute markets are pulled from Gamma into Convex and
@@ -54,9 +51,8 @@ export default function Home() {
               snapshots now flow through the collector into Convex, and the
               market WebSocket now runs beside polling in shadow mode to store
               raw events and measure parity. Each market route renders replay
-              charts plus the gap-aware timeline, and the analytics route turns
-              stored summaries into threshold, calibration, and crossing-time
-              views.
+              charts plus the gap-aware timeline, while closed markets are
+              finalized into stored summaries for future research.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -87,22 +83,10 @@ export default function Home() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/signals"
-              className="inline-flex rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-stone-900 transition-colors hover:border-stone-300 hover:bg-stone-50"
-            >
-              Open live signals
-            </Link>
-            <Link
               href="/markets"
               className="inline-flex rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-stone-900 transition-colors hover:border-stone-300 hover:bg-stone-50"
             >
               Browse saved markets
-            </Link>
-            <Link
-              href="/analytics"
-              className="inline-flex rounded-full bg-stone-950 px-5 py-3 text-sm font-medium text-stone-50 transition-colors hover:bg-stone-800"
-            >
-              Open analytics
             </Link>
           </div>
         </div>

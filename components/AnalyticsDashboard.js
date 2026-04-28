@@ -1,1935 +1,1175 @@
 "use client";
 
-import { startTransition, useDeferredValue, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "convex/react";
+import { useSearchParams } from "next/navigation";
 
 import { api } from "@/convex/_generated/api";
-import {
-  ANALYTICS_DATE_RANGE_OPTIONS,
-  ANALYTICS_MIN_SAMPLE_OPTIONS,
-  ANALYTICS_QUALITY_OPTIONS,
-  COHORT_DRILLDOWN_CHECKPOINT_OPTIONS,
-  COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS,
-  COHORT_DRILLDOWN_SIDE_OPTIONS,
-} from "@/packages/shared/src/analytics.js";
-import {
-  formatBtcUsd,
-  formatEtDateTime,
-  formatProbability,
-  getToneClasses,
-} from "@/components/marketFormat";
 
-function StatCard({ eyebrow, title, body }) {
-  return (
-    <article className="rounded-[1.35rem] border border-black/10 bg-white/85 p-5 shadow-[0_14px_40px_rgba(30,30,30,0.05)]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-        {eyebrow}
-      </p>
-      <h3 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-        {title}
-      </h3>
-      <p className="mt-2 text-sm leading-7 text-stone-700">{body}</p>
-    </article>
+const CHECKPOINTS = [30, 60, 90, 120, 180, 200, 210, 220, 240, 270, 285, 295];
+const TARGET_CHECKPOINTS = [180, 200, 210, 220, 240];
+const panel = "rounded-[1.2rem] border border-black/10 bg-white/88 p-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]";
+const th = "py-2 pr-4 text-xs uppercase tracking-[0.14em] text-stone-500";
+const td = "py-2 pr-4 text-sm text-stone-700";
+
+function n(value) {
+  return Number.isFinite(value) ? value.toLocaleString() : "n/a";
+}
+
+function pct(value) {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "n/a";
+}
+
+function bps(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)} bps` : "n/a";
+}
+
+function rank(value) {
+  return Number.isFinite(value) ? value.toFixed(3) : "n/a";
+}
+
+function signedBps(value) {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)} bps`;
+}
+
+const stabilityMetricDefinitions = {
+  endpointWinRate:
+    "Stable wins plus fragile wins. The checkpoint leader won at close, whether the path was clean or fragile.",
+  flipLossRate:
+    "Checkpoint leader lost at close.",
+  pathRiskRate:
+    "Flip loss plus no-decision plus unknown path. This is the broad risk bucket.",
+  noDecisionAtCheckpointRate:
+    "BTC was inside the <=0.5 bps noise band at checkpoint, so there was no clean leader decision.",
+};
+
+const derivedStabilityMetrics = {
+  endpointWinRate: {
+    id: "endpointWinRate",
+    label: "Endpoint win",
+    positive: true,
+    valueField: "endpointWinRate",
+  },
+};
+
+const coreStabilityMetricIds = [
+  "endpointWinRate",
+  "flipLossRate",
+  "noDecisionAtCheckpointRate",
+  "pathRiskRate",
+];
+
+function getCoreStabilityMetrics(stability) {
+  const metricsById = new Map(
+    (stability.metrics ?? []).map((metric) => [metric.id, metric]),
+  );
+
+  return coreStabilityMetricIds
+    .map((metricId) => derivedStabilityMetrics[metricId] ?? metricsById.get(metricId))
+    .filter(Boolean);
+}
+
+function getStabilityCellValue(cell, metric) {
+  if (!cell) {
+    return null;
+  }
+
+  if (metric.id === "endpointWinRate") {
+    if (
+      !Number.isFinite(cell.stableLeaderWinRate) ||
+      !Number.isFinite(cell.fragileWinRate)
+    ) {
+      return null;
+    }
+
+    return cell.stableLeaderWinRate + cell.fragileWinRate;
+  }
+
+  return cell[metric.valueField];
+}
+
+function stabilityMetricValue(metric, value) {
+  return metric.id === "medianMaxAdverseBps" ? bps(value) : pct(value);
+}
+
+function stabilityExportCell(cell, metric) {
+  if (!cell) {
+    return "n/a";
+  }
+
+  if (cell.hidden) {
+    return `hidden, N=${n(cell.N)}`;
+  }
+
+  return `${stabilityMetricValue(metric, getStabilityCellValue(cell, metric))} \\| N=${n(cell.N)} \\| p90 adverse=${bps(cell.p90MaxAdverseBps)}`;
+}
+
+function buildStabilityMetricMarkdown(stability, metric, computedAt, options = {}) {
+  const cells = new Map(
+    (stability.heatmap ?? []).map((cell) => [
+      `${cell.checkpointSecond}:${cell.distanceBucket}`,
+      cell,
+    ]),
+  );
+  const titleLevel = options.titleLevel ?? 2;
+  const titlePrefix = "#".repeat(titleLevel);
+  const lines = [
+    `${titlePrefix} Leader Stability Heatmap - ${metric.label}`,
+    "",
+    `Rollup computed: ${dateTime(computedAt)} UTC`,
+    `Clean sample size: N=${n(stability.cleanCount)}`,
+    `Metric definition: ${stabilityMetricDefinitions[metric.id] ?? metric.label}`,
+    "Cell format: metric value | N | p90 adverse bps.",
+    "Support note: cells below N=50 are hidden in the dashboard; cells from N=50 to N=99 are shown without color.",
+    "",
+    `| Checkpoint | ${stability.distanceBuckets.map((bucket) => bucket.id === "le_0_5" ? `${bucket.label} (no decision)` : bucket.label).join(" | ")} |`,
+    `|---|${stability.distanceBuckets.map(() => "---:").join("|")}|`,
+  ];
+
+  for (const checkpointSecond of CHECKPOINTS) {
+    const values = stability.distanceBuckets.map((bucket) =>
+      stabilityExportCell(cells.get(`${checkpointSecond}:${bucket.id}`), metric),
+    );
+
+    lines.push(`| T+${checkpointSecond}s | ${values.join(" | ")} |`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildAllStabilityMarkdown(stability, computedAt, metrics) {
+  const lines = [
+    "# BTC 5m Leader Stability Heatmaps",
+    "",
+    `Rollup computed: ${dateTime(computedAt)} UTC`,
+    `Clean sample size: N=${n(stability.cleanCount)}`,
+    "",
+    "Definitions:",
+    "- Endpoint win: stable win plus fragile win. The checkpoint leader won at close.",
+    "- Flip loss: checkpoint leader lost at close.",
+    "- No decision: BTC was inside the <=0.5 bps noise band at checkpoint.",
+    "- Path risk: flip loss plus no decision plus unknown path.",
+    "- p90 adverse: 90th percentile worst adverse move after checkpoint, in bps.",
+    "",
+  ];
+
+  for (const metric of metrics) {
+    lines.push(buildStabilityMetricMarkdown(stability, metric, computedAt, { titleLevel: 2 }));
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
+}
+
+function compactDiagnosticCell(cell, dimensionKey, dimensionLabelKey) {
+  return {
+    anyFlipAfterTRate: cell.anyFlipAfterTRate,
+    checkpointSecond: cell.checkpointSecond,
+    colorEligible: cell.colorEligible,
+    distanceBucket: cell.distanceBucket,
+    distanceBucketLabel: cell.distanceBucketLabel,
+    flipLossRate: cell.flipLossRate,
+    fragileWinRate: cell.fragileWinRate,
+    leaderEligibleN: cell.leaderEligibleN,
+    leaderWinRate: cell.leaderWinRate,
+    medianLeaderAlignedMomentum30sBps: cell.medianLeaderAlignedMomentum30sBps,
+    medianLeaderAlignedMomentum60sBps: cell.medianLeaderAlignedMomentum60sBps,
+    medianMaxAdverseBps: cell.medianMaxAdverseBps,
+    medianMaxAdverseDrawdownBps: cell.medianMaxAdverseDrawdownBps,
+    medianMomentum30sBps: cell.medianMomentum30sBps,
+    medianMomentum60sBps: cell.medianMomentum60sBps,
+    medianPreCrossCountLast60s: cell.medianPreCrossCountLast60s,
+    medianPreRange60sBps: cell.medianPreRange60sBps,
+    medianPreRange120sBps: cell.medianPreRange120sBps,
+    N: cell.N,
+    p90MaxAdverseBps: cell.p90MaxAdverseBps,
+    p90MaxAdverseDrawdownBps: cell.p90MaxAdverseDrawdownBps,
+    sparse: cell.sparse,
+    splitBucket: cell[dimensionKey],
+    splitBucketLabel: cell[dimensionLabelKey],
+    stableLeaderWinRate: cell.stableLeaderWinRate,
+  };
+}
+
+function compactPathShapeCell(cell) {
+  return {
+    anyFlipAfterTRate: cell.anyFlipAfterTRate,
+    checkpointSecond: cell.checkpointSecond,
+    colorEligible: cell.colorEligible,
+    distanceMedianBps: cell.distanceMedianBps,
+    flipLossRate: cell.flipLossRate,
+    fragileWinRate: cell.fragileWinRate,
+    leaderEligibleN: cell.leaderEligibleN,
+    leaderWinRate: cell.leaderWinRate,
+    medianMaxAdverseBps: cell.medianMaxAdverseBps,
+    medianMaxAdverseDrawdownBps: cell.medianMaxAdverseDrawdownBps,
+    N: cell.N,
+    p90MaxAdverseBps: cell.p90MaxAdverseBps,
+    p90MaxAdverseDrawdownBps: cell.p90MaxAdverseDrawdownBps,
+    prePathShape: cell.prePathShape,
+    prePathShapeLabel: cell.prePathShapeLabel,
+    shareOfCheckpoint: cell.shareOfCheckpoint,
+    sparse: cell.sparse,
+    stableLeaderWinRate: cell.stableLeaderWinRate,
+  };
+}
+
+function buildLlmChartDataExport(stability, computedAt) {
+  return JSON.stringify(
+    {
+      charts: {
+        distanceBy30sMomentum: {
+          buckets: stability.momentumAgreementBuckets,
+          cells: (stability.momentumAgreement ?? []).map((cell) =>
+            compactDiagnosticCell(
+              cell,
+              "momentumAgreementBucket",
+              "momentumAgreementBucketLabel",
+            ),
+          ),
+          description:
+            "Checkpoint and leader-distance rows split by whether 30s BTC momentum agrees with the current leader.",
+        },
+        distanceByChop: {
+          buckets: stability.chopBuckets,
+          cells: (stability.pathRiskByChop ?? []).map((cell) =>
+            compactDiagnosticCell(
+              cell,
+              "preChopBucket",
+              "preChopBucketLabel",
+            ),
+          ),
+          description:
+            "Checkpoint and leader-distance rows split by pre-checkpoint chop bucket.",
+        },
+        preCheckpointPathShapes: {
+          buckets: stability.prePathShapes?.buckets ?? [],
+          cells: (stability.prePathShapes?.cells ?? []).map(compactPathShapeCell),
+          description:
+            "Checkpoint rows split by derived pre-checkpoint path shape.",
+        },
+      },
+      computedAt,
+      definitions: {
+        chop: stability.preChopBucketDefinitions,
+        diagnosticDistanceBuckets: stability.diagnosticDistanceBuckets,
+        metricUnits: {
+          rates: "0 to 1 probabilities",
+          distances: "basis points",
+          N: "row count",
+        },
+        support: stability.support,
+        targetCheckpoints: stability.targetCheckpoints,
+      },
+      prompt:
+        "Analyze these BTC 5-minute checkpoint charts. Focus on which signals separate leader win rate after holding checkpoint and distance fixed, where chop and 30s momentum disagree, and which cells are too sparse to trust.",
+    },
+    null,
+    2,
   );
 }
 
-function ControlField({ children, label }) {
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.left = "-9999px";
+  textarea.style.position = "fixed";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Copy command failed");
+  }
+}
+
+function dateTime(ts) {
+  if (!Number.isFinite(ts)) {
+    return "n/a";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    second: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(ts));
+}
+
+function stabilityCellStyle(cell, metric) {
+  if (!cell || cell.hidden || !cell.colorEligible) {
+    return {};
+  }
+
+  const value = getStabilityCellValue(cell, metric);
+
+  if (!Number.isFinite(value)) {
+    return {};
+  }
+
+  const power =
+    metric.id === "medianMaxAdverseBps"
+      ? Math.min(value / 8, 1)
+      : Math.min(value / 0.8, 1);
+  const rgb = metric.positive ? "16, 185, 129" : "244, 63, 94";
+  const alpha = 0.08 + power * 0.32;
+
+  return { backgroundColor: `rgba(${rgb}, ${alpha})` };
+}
+
+function riskCellStyle(cell, positive = true) {
+  if (!cell || cell.sparse || !cell.colorEligible) {
+    return {};
+  }
+
+  const value = cell.leaderWinRate;
+
+  if (!Number.isFinite(value)) {
+    return {};
+  }
+
+  const rgb = positive ? "16, 185, 129" : "244, 63, 94";
+  const power = Math.min(value / 0.9, 1);
+
+  return { backgroundColor: `rgba(${rgb}, ${0.08 + power * 0.28})` };
+}
+
+function riskCell(cell, options = {}) {
+  if (!cell) {
+    return <span className="text-xs text-stone-400">n/a</span>;
+  }
+
+  const adverse = Number.isFinite(cell.p90MaxAdverseDrawdownBps)
+    ? cell.p90MaxAdverseDrawdownBps
+    : cell.p90MaxAdverseBps;
+  const detailValue =
+    options.detailField && Number.isFinite(cell[options.detailField])
+      ? cell[options.detailField]
+      : null;
+  const detailFormatter = options.detailFormatter ?? bps;
+
   return (
-    <label className="grid gap-2 text-sm font-medium text-stone-700">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-stone-500">
-        {label}
+    <>
+      <span className="block font-semibold text-stone-950">
+        {cell.sparse ? "sparse" : `WR ${pct(cell.leaderWinRate)}`}
       </span>
-      {children}
-    </label>
+      <span className="block text-xs text-stone-600">
+        SW {pct(cell.stableLeaderWinRate)} / FL {pct(cell.flipLossRate)}
+      </span>
+      <span className="block text-xs text-stone-600">N {n(cell.N)}</span>
+      {options.showPrior ? (
+        <span className="block text-xs text-stone-600">
+          prior {n(cell.priorNMedian)}
+        </span>
+      ) : null}
+      <span className="block text-xs text-stone-600">
+        p90 dd {bps(adverse)}
+      </span>
+      {detailValue === null ? null : (
+        <span className="block text-xs text-stone-600">
+          {options.detailLabel} {detailFormatter(detailValue)}
+        </span>
+      )}
+    </>
   );
 }
 
-function MetricPanel({ detail, label, value }) {
+function Panel({ children, label, title }) {
   return (
-    <div className="rounded-[1rem] border border-black/10 bg-stone-50 px-4 py-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+    <section className={panel}>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-        {value}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-stone-700">{detail}</p>
-    </div>
-  );
-}
-
-function TableShell({ caption, children, title }) {
-  return (
-    <article className="rounded-[1.45rem] border border-black/10 bg-white/85 p-6 shadow-[0_14px_40px_rgba(30,30,30,0.05)]">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-stone-500">
-            {caption}
-          </p>
-          <h3 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-            {title}
-          </h3>
-        </div>
-      </div>
-      <div className="mt-5">{children}</div>
-    </article>
-  );
-}
-
-function LoadingState() {
-  return (
-    <section className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <div
-            key={index}
-            className="h-32 animate-pulse rounded-[1.35rem] bg-white/80"
-          />
-        ))}
-      </div>
-      <div className="h-80 animate-pulse rounded-[1.45rem] bg-white/80" />
-      <div className="h-80 animate-pulse rounded-[1.45rem] bg-white/80" />
+      <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-stone-950">
+        {title}
+      </h2>
+      <div className="mt-4">{children}</div>
     </section>
   );
 }
 
-function EmptyTable({ message }) {
+function ChopBucketDefinitions({ definitions }) {
+  const ranks = definitions?.ranks;
+
+  if (!ranks) {
+    return null;
+  }
+
   return (
-    <div className="rounded-[1.2rem] border border-dashed border-stone-300 bg-stone-50/70 p-5 text-sm leading-7 text-stone-700">
-      {message}
+    <div className="mb-4 rounded-[0.85rem] border border-black/10 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+      <p className="font-semibold text-stone-950">Chop bucket definitions</p>
+      <dl className="mt-2 grid gap-2 md:grid-cols-3">
+        <div>
+          <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">
+            Pooled chop rank
+          </dt>
+          <dd>
+            Low &lt; {rank(ranks.lowThreshold)}; high &gt;= {rank(ranks.highThreshold)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">
+            Near-line rank
+          </dt>
+          <dd>High &gt;= {rank(ranks.nearLineHighThreshold)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">
+            Oscillation rank
+          </dt>
+          <dd>High &gt;= {rank(ranks.oscillationHighThreshold)}</dd>
+        </div>
+      </dl>
+      <p className="mt-2 text-xs text-stone-500">
+        Percentile ranks are pooled over target checkpoints{" "}
+        {(ranks.targetCheckpoints ?? [])
+          .map((second) => `T+${second}s`)
+          .join(", ")}
+        ; tie handling: {ranks.tieHandling ?? "n/a"}.
+      </p>
     </div>
   );
 }
 
-function formatCount(value) {
-  if (!Number.isFinite(value)) {
-    return "0";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatCountMetric(value) {
-  if (value == null) {
-    return "pending";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: Number.isInteger(value) ? 0 : 1,
-  }).format(value);
-}
-
-function formatSideLabel(side) {
-  if (side === "up") {
-    return "Up";
-  }
-
-  if (side === "down") {
-    return "Down";
-  }
-
-  return side ?? "pending";
-}
-
-function formatSignedBtcUsd(value) {
-  if (value == null) {
-    return "pending";
-  }
-
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatBtcUsd(value)}`;
-}
-
-function formatRateDifference(value) {
-  if (value == null) {
-    return "pending";
-  }
-
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toFixed(1)} pts`;
-}
-
-function formatRangeCi(low, high, formatter) {
-  if (low == null || high == null) {
-    return "95% CI unavailable";
-  }
-
-  return `95% CI ${formatter(low)} to ${formatter(high)}`;
-}
-
-function formatProbabilityCi(summary) {
-  if (!summary || summary.rate == null) {
-    return "95% CI unavailable";
-  }
-
-  return formatRangeCi(summary.ciLow, summary.ciHigh, formatProbability);
-}
-
-function formatValueByMetric(value, format) {
-  if (format === "share") {
-    return formatProbability(value);
-  }
-
-  if (format === "count") {
-    return formatCountMetric(value);
-  }
-
-  if (format === "signedBtcUsd") {
-    return formatSignedBtcUsd(value);
-  }
-
-  return formatBtcUsd(value);
-}
-
-function formatStatusLabel(status) {
-  if (status === "supported") {
-    return "supported at 95%";
-  }
-
-  if (status === "not_supported") {
-    return "not supported";
-  }
-
-  return "underpowered";
-}
-
-function getStatusTone(status) {
-  if (status === "supported") {
-    return "emerald";
-  }
-
-  if (status === "not_supported") {
-    return "stone";
-  }
-
-  return "amber";
-}
-
-function formatCalibrationGap(value) {
-  if (value == null) {
-    return "pending";
-  }
-
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toFixed(1)} pts`;
-}
-
-function formatSignalQualityScore(value) {
-  if (value == null) {
-    return "pending";
-  }
-
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatBoundaryMoveHeadline(headline) {
-  if (!headline || headline.sampleCount === 0) {
-    return "No finalized markets in the current filter set have both a start and end BTC reference yet.";
-  }
-
-  return `${formatProbability(headline.share)} of usable markets moved at least ${formatBtcUsd(
-    headline.thresholdUsd,
-  )} from price to beat to close over 5 minutes.`;
-}
-
-function formatSupportFloorMessage(usableCount, minSampleSize) {
-  if (usableCount >= minSampleSize) {
-    return "Share of usable markets whose absolute BTC move clears each USD threshold.";
-  }
-
-  return `At least ${formatCount(minSampleSize)} usable markets are required by the current support floor, but only ${formatCount(
-    usableCount,
-  )} currently have both boundary references.`;
-}
-
-function formatHeadlineFinding(headlineFinding) {
-  if (!headlineFinding || headlineFinding.sampleCount === 0) {
-    return "No finalized markets in the current filter set reached Up >= 70% at T+60.";
-  }
-
-  return `When Up was at least 70% by T+60, Up won ${formatProbability(headlineFinding.winRate)} of the time across ${formatCount(headlineFinding.sampleCount)} market${headlineFinding.sampleCount === 1 ? "" : "s"}.`;
-}
-
-function formatDateSpan(minTs, maxTs) {
-  if (minTs == null || maxTs == null) {
-    return "No finalized market windows match the current filters.";
-  }
-
-  return `${formatEtDateTime(minTs)} to ${formatEtDateTime(maxTs)}`;
-}
-
-function formatRelativeSecond(value) {
-  if (value === null || value === undefined) {
-    return "Never";
-  }
-
-  return `T+${formatCount(value)}s`;
-}
-
-function formatOffsetClock(second) {
-  if (second === null || second === undefined) {
-    return "Never";
-  }
-
-  const totalSeconds = Math.max(0, Number(second) || 0);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatRelativeSecondWithClock(value) {
-  if (value === null || value === undefined) {
-    return "Never";
-  }
-
-  return `${formatRelativeSecond(value)} (${formatOffsetClock(value)})`;
-}
-
-function formatCheckpointLabel(checkpointSecond) {
-  return `T+${formatCount(checkpointSecond)}s (${formatOffsetClock(checkpointSecond)})`;
-}
-
-function formatBtcWinningSideHeadline(headline) {
-  if (!headline || headline.sampleCount === 0) {
-    return "No finalized markets match the current filters for BTC first-winning-side timing yet.";
-  }
-
-  return `${formatProbability(headline.share)} of filtered markets first reached the eventual winning side by ${formatCheckpointLabel(
-    headline.checkpointSecond,
-  )}.`;
-}
-
-function formatBestSignalDetail(card, minSampleSize) {
-  if (!card || card.bucketLabel == null) {
-    return `No ${formatSideLabel(card?.side)} bucket at ${formatCheckpointLabel(
-      card?.checkpointSecond ?? 0,
-    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
-  }
-
-  return `${card.bucketLabel} on ${formatCount(card.sampleCount)} samples, average BTC delta ${formatBtcUsd(
-    card.averageDeltaUsd,
-  )}.`;
-}
-
-function formatEdgeDetail(card, minSampleSize) {
-  if (!card || card.bucketLabel == null) {
-    return `No ${formatSideLabel(card?.side)} edge row at ${formatCheckpointLabel(
-      card?.checkpointSecond ?? 0,
-    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
-  }
-
-  return `${card.bucketLabel} on ${formatCount(card.sampleCount)} samples. Market priced ${formatSideLabel(
-    card.side,
-  )} at ${formatProbability(card.averageDisplayedProbability)} on average versus a realized win rate of ${formatProbability(
-    card.winRate,
-  )}.`;
-}
-
-function formatSignalQualityEdgeDetail(card, minSampleSize) {
-  if (!card || card.distanceBucketLabel == null || card.qualityBucketLabel == null) {
-    return `No ${formatSideLabel(card?.side)} signal-quality row at ${formatCheckpointLabel(
-      card?.checkpointSecond ?? 0,
-    )} meets the ${formatCount(minSampleSize)}-sample floor.`;
-  }
-
-  return `${card.distanceBucketLabel}, ${card.qualityBucketLabel}, ${formatCount(
-    card.sampleCount,
-  )} samples. Avg market price ${formatProbability(
-    card.averageDisplayedProbability,
-  )}, realized win rate ${formatProbability(card.winRate)}.`;
-}
-
-function formatCadenceMix(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return "Cadence mix unavailable.";
-  }
-
-  return rows
-    .map((row) => `${row.label}: ${formatProbability(row.share)}`)
-    .join(" · ");
-}
-
-function FilterSelect({ onChange, options, value }) {
+function Loading() {
   return (
-    <select
-      value={value}
-      onChange={onChange}
-      className="rounded-[1rem] border border-black/10 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition-colors focus:border-stone-950"
-    >
-      {options.map((option) => (
-        <option key={String(option.id ?? option)} value={option.id ?? option}>
-          {option.label ?? option}
-        </option>
+    <div className="grid gap-4 md:grid-cols-2">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className={panel}>
+          <div className="h-3 w-28 animate-pulse rounded-full bg-stone-200" />
+          <div className="mt-4 h-8 animate-pulse rounded bg-stone-100" />
+          <div className="mt-3 h-20 animate-pulse rounded bg-stone-100" />
+        </div>
       ))}
-    </select>
+    </div>
   );
 }
 
-function CrossingDistribution({ distribution }) {
-  return (
-    <article className="rounded-[1.2rem] border border-black/10 bg-white p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-            First crossing
-          </p>
-          <h4 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-stone-950">
-            Above {distribution.thresholdLabel}
-          </h4>
-        </div>
-        <span className="rounded-full border border-black/10 bg-stone-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-stone-700">
-          {formatCount(distribution.crossedCount)} crossed
-        </span>
-      </div>
+function DatasetEligibility({ health, stability }) {
+  const totalMarkets = health?.cohortFunnel?.analyticsRows ?? null;
+  const notEligible = health?.cohortFunnel?.excluded ?? null;
+  const eligible = health?.baseRates?.cleanCount ?? stability?.cleanCount ?? null;
+  const notEligibleRate =
+    Number.isFinite(totalMarkets) && totalMarkets > 0 && Number.isFinite(notEligible)
+      ? notEligible / totalMarkets
+      : null;
 
-      <div className="mt-5 space-y-3">
-        {distribution.buckets.map((bucket) => (
-          <div key={bucket.label} className="grid gap-2">
-            <div className="flex items-center justify-between gap-3 text-sm text-stone-700">
-              <span>{bucket.label}</span>
-              <span>
-                {formatCount(bucket.count)} / {formatProbability(bucket.share)}
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-stone-100">
-              <div
-                className="h-full rounded-full bg-stone-950"
-                style={{ width: `${Math.max(0, Math.min((bucket.share ?? 0) * 100, 100))}%` }}
-              />
-            </div>
-          </div>
+  return (
+    <Panel label="Dataset" title="Market eligibility">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-[0.85rem] border border-black/10 bg-stone-50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">
+            Markets
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-stone-950">
+            {n(totalMarkets)}
+          </p>
+        </div>
+        <div className="rounded-[0.85rem] border border-black/10 bg-stone-50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">
+            Eligible
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-stone-950">
+            {n(eligible)}
+          </p>
+        </div>
+        <div className="rounded-[0.85rem] border border-black/10 bg-stone-50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">
+            Not eligible
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-stone-950">
+            {n(notEligible)}
+          </p>
+          <p className="mt-1 text-xs text-stone-500">
+            {pct(notEligibleRate)} of stored markets
+          </p>
+        </div>
+      </div>
+      <p className="mt-4 text-sm leading-6 text-stone-700">
+        Not eligible means the row failed the analytics quality gates, such as
+        missing or stale checkpoint BTC, missing outcome, derived-only outcome,
+        or missing price-to-beat.
+      </p>
+    </Panel>
+  );
+}
+
+function Leader({ stability }) {
+  const stabilityExample = stability?.byCheckpoint?.find(
+    (row) => row.checkpointSecond === 270,
+  );
+
+  return (
+    <Panel label={`Clean N ${n(stability.cleanCount)}`} title="Checkpoint outcome decomposition">
+      <p className="mb-4 text-sm leading-6 text-stone-700">
+        This is the main accounting table. Stable win is the clean state,
+        fragile win combines noise-touch and hard-flip recovery wins, no
+        decision means BTC was inside the noise band at checkpoint, and path
+        risk means flip loss plus no decision plus unknown path.
+      </p>
+      {stabilityExample ? (
+        <p className="mb-4 rounded-[0.75rem] border border-black/10 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+          Example: at T+270, {pct(stabilityExample.stableLeaderWinRate)} of
+          markets were clean stable wins, {pct(stabilityExample.fragileWinRate)}
+          were fragile endpoint wins, and {pct(stabilityExample.pathRiskRate)}
+          were path-risk cases. {pct(stabilityExample.noDecisionAtCheckpointRate)}
+          were treated as no-decision because BTC was inside the noise band.
+        </p>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left">
+          <thead>
+            <tr>
+              <th className={th}>Checkpoint</th>
+              <th className={`${th} text-right`}>N</th>
+              <th className={`${th} text-right`}>Eligible N</th>
+              <th className={`${th} text-right`}>Stable win</th>
+              <th className={`${th} text-right`}>Fragile win</th>
+              <th className={`${th} text-right`}>Flip loss</th>
+              <th className={`${th} text-right`}>No decision</th>
+              <th className={`${th} text-right`}>Unknown</th>
+              <th className={`${th} text-right`}>Path risk</th>
+              <th className={`${th} text-right`}>Any flip</th>
+              <th className={`${th} text-right`}>Med adverse</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-100">
+            {stability.byCheckpoint.map((row) => (
+              <tr key={row.checkpointSecond}>
+                <td className={`${td} font-medium text-stone-950`}>
+                  T+{row.checkpointSecond}s
+                </td>
+                <td className={`${td} text-right`}>{n(row.N)}</td>
+                <td className={`${td} text-right`}>{n(row.leaderEligibleN)}</td>
+                <td className="py-2 pr-4 text-right font-medium text-stone-950">
+                  {pct(row.stableLeaderWinRate)}
+                </td>
+                <td className={`${td} text-right`}>{pct(row.fragileWinRate)}</td>
+                <td className={`${td} text-right`}>{pct(row.flipLossRate)}</td>
+                <td className={`${td} text-right`}>
+                  {pct(row.noDecisionAtCheckpointRate)}
+                </td>
+                <td className={`${td} text-right`}>{pct(row.unknownPathRate)}</td>
+                <td className={`${td} text-right`}>{pct(row.pathRiskRate)}</td>
+                <td className={`${td} text-right`}>{pct(row.anyFlipAfterTRate)}</td>
+                <td className={`${td} text-right`}>
+                  {bps(row.medianMaxAdverseBps)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function StabilityHeatmap({
+  computedAt,
+  metric,
+  metrics,
+  onMetricChange,
+  stability,
+}) {
+  const [copyStatus, setCopyStatus] = useState("");
+  const cells = new Map(
+    (stability.heatmap ?? []).map((cell) => [
+      `${cell.checkpointSecond}:${cell.distanceBucket}`,
+      cell,
+    ]),
+  );
+
+  async function copyMetric(metricToCopy) {
+    try {
+      await copyText(buildStabilityMetricMarkdown(stability, metricToCopy, computedAt));
+      setCopyStatus(`Copied ${metricToCopy.label}`);
+      window.setTimeout(() => setCopyStatus(""), 2500);
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  }
+
+  async function copyAllMetrics() {
+    try {
+      await copyText(buildAllStabilityMarkdown(stability, computedAt, metrics));
+      setCopyStatus("Copied all metrics");
+      window.setTimeout(() => setCopyStatus(""), 2500);
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  }
+
+  return (
+    <Panel label={`Stability N ${n(stability.cleanCount)}`} title="Leader stability heatmap">
+      <p className="mb-4 text-sm leading-6 text-stone-700">
+        This uses the BTC path after each checkpoint. Stable and fragile wins
+        are combined as endpoint wins here; the decomposition table above keeps
+        them separate for path-quality context.
+      </p>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {metrics.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            onClick={() => onMetricChange(candidate.id)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
+              candidate.id === metric.id
+                ? "border-stone-950 bg-stone-950 text-white"
+                : "border-black/10 bg-white text-stone-700"
+            }`}
+          >
+            {candidate.label}
+          </button>
         ))}
       </div>
-    </article>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => copyMetric(metric)}
+          className="rounded-full border border-black/10 bg-stone-50 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100"
+        >
+          Copy current heatmap
+        </button>
+        <button
+          type="button"
+          onClick={copyAllMetrics}
+          className="rounded-full border border-black/10 bg-stone-50 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100"
+        >
+          Copy all heatmaps
+        </button>
+        {copyStatus ? (
+          <span className="text-xs font-medium text-stone-500">
+            {copyStatus}
+          </span>
+        ) : null}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1080px] border-separate border-spacing-1 text-sm">
+          <thead className="text-xs uppercase tracking-[0.12em] text-stone-500">
+            <tr>
+              <th className="px-2 py-2 text-left">T</th>
+              {stability.distanceBuckets.map((bucket) => (
+                <th key={bucket.id} className="px-2 py-2 text-center">
+                  {bucket.label}
+                  {bucket.id === "le_0_5" ? (
+                    <span className="block text-[10px] normal-case tracking-normal">
+                      no decision
+                    </span>
+                  ) : null}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {CHECKPOINTS.map((checkpointSecond) => (
+              <tr key={checkpointSecond}>
+                <th className="px-2 py-2 text-left font-semibold text-stone-950">
+                  T+{checkpointSecond}s
+                </th>
+                {stability.distanceBuckets.map((bucket) => {
+                  const cell = cells.get(`${checkpointSecond}:${bucket.id}`);
+                  const value = getStabilityCellValue(cell, metric);
+
+                  return (
+                    <td
+                      key={bucket.id}
+                      style={stabilityCellStyle(cell, metric)}
+                      className={`h-16 rounded-[0.65rem] border px-2 py-2 text-center ${
+                        cell?.hidden
+                          ? "border-stone-100 bg-stone-50 text-stone-400"
+                          : "border-black/10 text-stone-950"
+                      }`}
+                    >
+                      {cell?.hidden ? (
+                        <span className="text-xs">N {n(cell.N)}</span>
+                      ) : (
+                        <>
+                          <span className="block font-semibold">
+                            {metric.id === "medianMaxAdverseBps"
+                              ? bps(value)
+                              : pct(value)}
+                          </span>
+                          <span className="block text-xs text-stone-600">
+                            N {n(cell?.N)}
+                          </span>
+                          <span className="block text-xs text-stone-600">
+                            p90 adverse {bps(cell?.p90MaxAdverseBps)}
+                          </span>
+                        </>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
-function QualityPill({ quality }) {
-  const tone =
-    quality === "good"
-      ? "emerald"
-      : quality === "partial"
-        ? "amber"
-        : quality === "gap"
-          ? "rose"
-          : "stone";
+function PathTypes({ stability }) {
+  return (
+    <Panel label="Market path" title="Path archetypes">
+      <p className="mb-3 text-sm leading-6 text-stone-700">
+        Each market is assigned one full-window path type based on when the
+        eventual winner last took the BTC lead, how often BTC hard-flipped
+        across the line, and whether the path stayed too close to the noise
+        band.
+      </p>
+      <p className="mb-4 rounded-[0.75rem] border border-black/10 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-700">
+        Example: if DOWN took the final lead at T+210 and never lost it again,
+        that market is mid-lock. If BTC hard-flipped three or more times, it is
+        chop even if the final winner eventually became clear.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left">
+          <thead>
+            <tr>
+              <th className={th}>Path type</th>
+              <th className={`${th} text-right`}>N</th>
+              <th className={`${th} text-right`}>UP</th>
+              <th className={`${th} text-right`}>DOWN</th>
+              <th className={`${th} text-right`}>T+270 stable win</th>
+              <th className={`${th} text-right`}>Med close margin</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-100">
+            {stability.pathTypes.map((row) => (
+              <tr key={row.pathType}>
+                <td className={`${td} font-medium text-stone-950`}>
+                  {row.pathType}
+                </td>
+                <td className={`${td} text-right`}>{n(row.N)}</td>
+                <td className={`${td} text-right`}>{pct(row.upRate)}</td>
+                <td className={`${td} text-right`}>{pct(row.downRate)}</td>
+                <td className={`${td} text-right`}>
+                  {pct(row.stableWinRateAt270)}
+                </td>
+                <td className={`${td} text-right`}>
+                  {bps(row.closeMarginMedianBps)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function DiagnosticMatrix({
+  buckets,
+  cells,
+  detailField,
+  detailFormatter,
+  detailLabel,
+  dimensionKey,
+  example,
+  label,
+  showPrior = false,
+  summary,
+  title,
+}) {
+  const distanceBuckets =
+    stabilityDistanceBuckets(cells) ?? [];
+  const byKey = new Map(
+    (cells ?? []).map((cell) => [
+      `${cell.checkpointSecond}:${cell.distanceBucket}:${cell[dimensionKey]}`,
+      cell,
+    ]),
+  );
+
+  if (!cells?.length || !buckets?.length || distanceBuckets.length === 0) {
+    return null;
+  }
 
   return (
-    <span
-      className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${getToneClasses(tone)}`}
-    >
-      {quality}
-    </span>
+    <Panel label={label} title={title}>
+      {summary ? (
+        <p className="mb-2 max-w-3xl text-sm leading-6 text-stone-700">
+          {summary}
+        </p>
+      ) : null}
+      {example ? (
+        <p className="mb-4 max-w-3xl text-sm leading-6 text-stone-600">
+          {example}
+        </p>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] border-separate border-spacing-1 text-sm">
+          <thead className="text-xs uppercase tracking-[0.12em] text-stone-500">
+            <tr>
+              <th className="px-2 py-2 text-left">T / distance</th>
+              {buckets.map((bucket) => (
+                <th key={bucket.id} className="px-2 py-2 text-center">
+                  {bucket.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {TARGET_CHECKPOINTS.flatMap((checkpointSecond) =>
+              distanceBuckets.map((distanceBucket) => (
+                <tr key={`${checkpointSecond}:${distanceBucket.id}`}>
+                  <th className="px-2 py-2 text-left font-semibold text-stone-950">
+                    T+{checkpointSecond}s
+                    <span className="block text-xs font-medium text-stone-500">
+                      {distanceBucket.label}
+                    </span>
+                  </th>
+                  {buckets.map((bucket) => {
+                    const cell = byKey.get(
+                      `${checkpointSecond}:${distanceBucket.id}:${bucket.id}`,
+                    );
+
+                    return (
+                      <td
+                        key={bucket.id}
+                        style={riskCellStyle(cell)}
+                        className="h-24 rounded-[0.65rem] border border-black/10 px-2 py-2 text-center"
+                      >
+                        {riskCell(cell, {
+                          detailField,
+                          detailFormatter,
+                          detailLabel,
+                          showPrior,
+                        })}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
-const EMPTY_BOUNDARY_MOVE_OVERVIEW = {
-  averageAbsMoveUsd: null,
-  averageSignedMoveUsd: null,
-  excludedCount: 0,
-  maxAbsMoveUsd: null,
-  medianAbsMoveUsd: null,
-  p75AbsMoveUsd: null,
-  p90AbsMoveUsd: null,
-  usableCount: 0,
-};
+function stabilityDistanceBuckets(cells) {
+  const seen = new Map();
 
-const EMPTY_BOUNDARY_MOVE_ROWS = [];
+  for (const cell of cells ?? []) {
+    if (!cell.distanceBucket || seen.has(cell.distanceBucket)) {
+      continue;
+    }
 
-const EMPTY_BTC_WINNING_SIDE_OVERVIEW = {
-  conflictCount: 0,
-  matchingCount: 0,
-  medianWinningSideSecond: null,
-  missingAnchorCount: 0,
-  noBtcDataCount: 0,
-  p25WinningSideSecond: null,
-  p75WinningSideSecond: null,
-  sampleCount: 0,
-  neverMatchedCount: 0,
-};
+    seen.set(cell.distanceBucket, {
+      id: cell.distanceBucket,
+      label: cell.distanceBucketLabel,
+    });
+  }
 
-const EMPTY_BTC_WINNING_SIDE_HEADLINE = {
-  checkpointLabel: "T+120",
-  checkpointSecond: 120,
-  matchingCount: 0,
-  sampleCount: 0,
-  share: null,
-};
+  return [...seen.values()];
+}
 
-const EMPTY_BTC_BEST_SIGNAL_ROWS = [];
-const EMPTY_BTC_MARKET_EDGE_ROWS = [];
-const EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS = [];
-const EMPTY_BTC_CANDIDATE_RULE_ROWS = [];
+function pathRiskChopExample(cells) {
+  const supported = (cell) =>
+    cell &&
+    !cell.sparse &&
+    Number.isFinite(cell.leaderWinRate) &&
+    Number.isFinite(cell.N);
+  const preferred = [
+    { checkpointSecond: 220, distanceBucket: "3_4", preChopBucket: "high" },
+    { checkpointSecond: 220, distanceBucket: "4_5", preChopBucket: "high" },
+    { checkpointSecond: 200, distanceBucket: "3_4", preChopBucket: "high" },
+    { checkpointSecond: 240, distanceBucket: "3_4", preChopBucket: "high" },
+  ];
+  const preferredCell = preferred
+    .map((target) =>
+      (cells ?? []).find(
+        (cell) =>
+          cell.checkpointSecond === target.checkpointSecond &&
+          cell.distanceBucket === target.distanceBucket &&
+          cell.preChopBucket === target.preChopBucket,
+      ),
+    )
+    .find(supported);
+  const cell = preferredCell ?? (cells ?? []).find(supported);
 
-const EMPTY_OVERVIEW = {
-  downWins: 0,
-  gapCount: 0,
-  goodCount: 0,
-  partialCount: 0,
-  sampleCount: 0,
-  unknownCount: 0,
-  upWins: 0,
-  windowStartMax: null,
-  windowStartMin: null,
-};
+  if (!cell) {
+    return null;
+  }
 
-const EMPTY_APPLIED_FILTERS = {
-  dateRange: "7d",
-  minSampleSize: 1,
-  quality: "all",
-};
+  const drawdown = Number.isFinite(cell.p90MaxAdverseDrawdownBps)
+    ? `, p90 adverse drawdown ${bps(cell.p90MaxAdverseDrawdownBps)}`
+    : "";
 
-const EMPTY_HEADLINE_FINDING = {
-  averageDisplayed: null,
-  checkpoint: "t60",
-  checkpointLabel: "T+60",
-  sampleCount: 0,
-  side: "up",
-  threshold: 0.7,
-  winCount: 0,
-  winRate: null,
-};
+  return `Example: T+${cell.checkpointSecond}s, ${cell.distanceBucketLabel}, ${cell.preChopBucketLabel}: leader won ${pct(cell.leaderWinRate)} across N ${n(cell.N)}${drawdown}.`;
+}
 
-const EMPTY_RATE_SUMMARY = {
-  ciHigh: null,
-  ciLow: null,
-  rate: null,
-  sampleCount: 0,
-  successCount: 0,
-};
+function RiskPanels({ computedAt, stability }) {
+  const durability = stability.durability ?? {};
+  const chopDegenerate = stability.preChopBucketDefinitions?.ranks?.degenerate;
+  const [copyStatus, setCopyStatus] = useState("");
 
-const EMPTY_COHORT_DRILLDOWN = {
-  checkpoint: "t120",
-  checkpointLabel: "T+120",
-  checkpointSecond: 120,
-  distanceBucketId: "30_50",
-  distanceBucketLabel: "$30-$49.99",
-  hourRows: [],
-  hypotheses: [],
-  lossRate: EMPTY_RATE_SUMMARY,
-  loserCount: 0,
-  numericMetrics: [],
-  sampleCount: 0,
-  selectionSide: "down",
-  sessionRows: [],
-  winRate: EMPTY_RATE_SUMMARY,
-  winnerCount: 0,
-};
+  async function copyLlmChartData() {
+    try {
+      await copyText(buildLlmChartDataExport(stability, computedAt));
+      setCopyStatus("Copied LLM chart data");
+      window.setTimeout(() => setCopyStatus(""), 2500);
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <Panel label="Working readout" title="Current leader durability rule">
+        <div className="space-y-3 text-sm leading-6 text-stone-700">
+          <p>
+            Treat 3 bps as the first candidate threshold, not the sweet spot,
+            and re-check the prior T+220 around 5 bps or T+240 around 4 bps
+            candidate after each tightened cohort refresh.
+          </p>
+          <p>
+            Then reject weak path-quality cases: recent-lock, near-line-heavy,
+            multi-flip chop, or 30s momentum against the current leader.
+          </p>
+          <p>
+            This is the clearest answer to why the current leader fails: many
+            checkpoint leaders are not real locks yet. They are recent-lock
+            leaders, multi-flip chop leaders, near-line-heavy leaders, or
+            unresolved leaders with insufficient margin.
+          </p>
+          <dl className="grid gap-2 rounded-[0.85rem] border border-black/10 bg-stone-50 p-4 sm:grid-cols-2">
+            <div>
+              <dt className="font-semibold text-stone-950">Recent lock risk</dt>
+              <dd>The leader just took control and has not proven it can hold.</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-stone-950">Multi-flip chop risk</dt>
+              <dd>BTC has already shown it can cross the line repeatedly.</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-stone-950">Near-line-heavy risk</dt>
+              <dd>BTC spent too much time near the noise band, so the apparent leader is weak.</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-stone-950">Momentum-against-leader risk</dt>
+              <dd>The current leader is ahead, but recent direction is pushing against it.</dd>
+            </div>
+          </dl>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
+            Working conclusion from the current rollup; keep retesting as sample size grows.
+          </p>
+        </div>
+      </Panel>
+      <Panel label="LLM export" title="Copy chart data">
+        <p className="mb-4 max-w-3xl text-sm leading-6 text-stone-700">
+          Copies structured JSON for Distance x chop, Distance x 30s momentum,
+          and Pre-checkpoint path shapes, including bucket definitions,
+          support rules, raw rates, counts, adverse drawdowns, and diagnostic medians.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={copyLlmChartData}
+            className="rounded-full border border-black/10 bg-stone-950 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-800"
+          >
+            Copy LLM chart data
+          </button>
+          {copyStatus ? (
+            <span className="text-xs font-medium text-stone-500">
+              {copyStatus}
+            </span>
+          ) : null}
+        </div>
+      </Panel>
+      {chopDegenerate ? (
+        <div className="rounded-[0.85rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Chop thresholds are degenerate for this rollup; valid rows are bucketed as medium chop.
+        </div>
+      ) : null}
+      <ChopBucketDefinitions definitions={stability.preChopBucketDefinitions} />
+      <DiagnosticMatrix
+        buckets={stability.chopBuckets}
+        cells={stability.pathRiskByChop}
+        dimensionKey="preChopBucket"
+        example={pathRiskChopExample(stability.pathRiskByChop)}
+        label="Path risk"
+        summary="Rows hold checkpoint time and leader distance constant; columns split the pre-checkpoint tape into low, medium, and high chop. Read across a row to see whether the same-size lead survives differently when the prior path was cleaner or more chaotic."
+        title="Distance x chop"
+      />
+      <DiagnosticMatrix
+        buckets={stability.momentumAgreementBuckets}
+        cells={stability.momentumAgreement}
+        detailField="medianLeaderAlignedMomentum30sBps"
+        detailFormatter={signedBps}
+        detailLabel="aligned"
+        dimensionKey="momentumAgreementBucket"
+        label="Momentum"
+        title="Distance x 30s momentum"
+      />
+      <DiagnosticMatrix
+        buckets={stability.leadAgeBuckets}
+        cells={stability.leaderAgeByDistance}
+        dimensionKey="leadAgeBucket"
+        label="Leader age"
+        title="Distance x lead age"
+      />
+      <DiagnosticMatrix
+        buckets={durability.buckets}
+        cells={durability.cells}
+        dimensionKey="durabilityBucket"
+        label="Cohort durability"
+        showPrior
+        title="Distance x durability"
+      />
+      <PrePathShapes stability={stability} />
+    </div>
+  );
+}
+
+function PrePathShapes({ stability }) {
+  const shapes = stability.prePathShapes;
+
+  if (!shapes?.cells?.length) {
+    return null;
+  }
+
+  const cells = new Map(
+    shapes.cells.map((cell) => [`${cell.checkpointSecond}:${cell.prePathShape}`, cell]),
+  );
+
+  return (
+    <Panel label="Path shape" title="Pre-checkpoint path shapes">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[920px] border-separate border-spacing-1 text-sm">
+          <thead className="text-xs uppercase tracking-[0.12em] text-stone-500">
+            <tr>
+              <th className="px-2 py-2 text-left">T</th>
+              {shapes.buckets.map((shape) => (
+                <th key={shape.id} className="px-2 py-2 text-center">
+                  {shape.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {TARGET_CHECKPOINTS.map((checkpointSecond) => (
+              <tr key={checkpointSecond}>
+                <th className="px-2 py-2 text-left font-semibold text-stone-950">
+                  T+{checkpointSecond}s
+                </th>
+                {shapes.buckets.map((shape) => {
+                  const cell = cells.get(`${checkpointSecond}:${shape.id}`);
+
+                  return (
+                    <td
+                      key={shape.id}
+                      style={riskCellStyle(cell)}
+                      className="h-24 rounded-[0.65rem] border border-black/10 px-2 py-2 text-center"
+                    >
+                      <span className="block font-semibold text-stone-950">
+                        {pct(cell?.shareOfCheckpoint)}
+                      </span>
+                      <span className="block text-xs text-stone-600">
+                        N {n(cell?.N)}
+                      </span>
+                      <span className="block text-xs text-stone-600">
+                        WR {pct(cell?.leaderWinRate)}
+                      </span>
+                      <span className="block text-xs text-stone-600">
+                        SW {pct(cell?.stableLeaderWinRate)} / FL {pct(cell?.flipLossRate)}
+                      </span>
+                      <span className="block text-xs text-stone-600">
+                        med {bps(cell?.distanceMedianBps)}
+                      </span>
+                      <span className="block text-xs text-stone-600">
+                        p90 dd {bps(cell?.p90MaxAdverseDrawdownBps)}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function StabilitySection({ computedAt, stability }) {
+  const searchParams = useSearchParams();
+  const metricId = searchParams.get("stabilityMetric");
+  const metrics = getCoreStabilityMetrics(stability);
+  const metric =
+    metrics.find((candidate) => candidate.id === metricId) ?? metrics[0];
+
+  if (!metric) {
+    return null;
+  }
+
+  function setMetric(nextMetricId) {
+    const params = new URLSearchParams(searchParams.toString());
+
+    params.set("stabilityMetric", nextMetricId);
+    window.history.replaceState(null, "", `?${params.toString()}`);
+  }
+
+  return (
+    <div className="space-y-5">
+      <StabilityHeatmap
+        computedAt={computedAt}
+        metric={metric}
+        metrics={metrics}
+        onMetricChange={setMetric}
+        stability={stability}
+      />
+      <RiskPanels computedAt={computedAt} stability={stability} />
+      <PathTypes stability={stability} />
+    </div>
+  );
+}
 
 export default function AnalyticsDashboard() {
-  const [filters, setFilters] = useState({
-    dateRange: "7d",
-    minSampleSize: 3,
-    quality: "all",
-  });
-  const [cohortSelection, setCohortSelection] = useState({
-    checkpoint: "t120",
-    distanceBucket: "30_50",
-    side: "down",
-  });
-  const deferredFilters = useDeferredValue(filters);
-  const deferredCohortSelection = useDeferredValue(cohortSelection);
-  const pageData = useQuery(api.analytics.getPageData, {
-    checkpoint: deferredCohortSelection.checkpoint,
-    dateRange: deferredFilters.dateRange,
-    distanceBucket: deferredCohortSelection.distanceBucket,
-    minSampleSize: deferredFilters.minSampleSize,
-    quality: deferredFilters.quality,
-    side: deferredCohortSelection.side,
-  });
+  const dashboard = useQuery(api.analytics.getDashboard);
 
-  function updateFilter(key, value) {
-    startTransition(() => {
-      setFilters((current) => ({
-        ...current,
-        [key]: key === "minSampleSize" ? Number(value) : value,
-      }));
-    });
+  if (!dashboard) {
+    return <Loading />;
   }
 
-  function updateCohortSelection(key, value) {
-    startTransition(() => {
-      setCohortSelection((current) => ({
-        ...current,
-        [key]: value,
-      }));
-    });
+  const { computedAt, health, stability } = dashboard;
+
+  if (!stability?.cleanCount) {
+    return (
+      <Panel label="Leader stability" title="No stability data yet">
+        <p className="text-sm leading-6 text-stone-700">
+          The stability rollup has not produced a clean cohort yet.
+        </p>
+      </Panel>
+    );
   }
-
-  if (pageData === undefined) {
-    return <LoadingState />;
-  }
-
-  const analytics = pageData?.dashboard;
-  const cohortDrilldown = pageData?.cohortDrilldown;
-
-  const {
-    boundaryMoveBuckets = [],
-    boundaryMoveByHour = EMPTY_BOUNDARY_MOVE_ROWS,
-    boundaryMoveBySession = EMPTY_BOUNDARY_MOVE_ROWS,
-    boundaryMoveHeadline = null,
-    boundaryMoveOverview = EMPTY_BOUNDARY_MOVE_OVERVIEW,
-    boundaryMoveThresholdStats = [],
-    btcBestSignalCards = EMPTY_BTC_BEST_SIGNAL_ROWS,
-    btcBestSignalMinSamples = 40,
-    btcMarketEdgeBucketRows = EMPTY_BTC_MARKET_EDGE_ROWS,
-    btcMarketEdgeCards = EMPTY_BTC_MARKET_EDGE_ROWS,
-    btcMarketEdgeMinSamples = 40,
-    btcSignalQualityEdgeBucketRows = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
-    btcSignalQualityEdgeCards = EMPTY_BTC_SIGNAL_QUALITY_EDGE_ROWS,
-    btcSignalQualityEdgeMinSamples = 40,
-    btcCandidateRules = EMPTY_BTC_CANDIDATE_RULE_ROWS,
-    btcCandidateRulesHoldoutShare = 0.3,
-    btcCandidateRulesMinSamples = 40,
-    btcCandidateRulesMinWinRate = 0.7,
-    btcWinningSideCadenceMix = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcConditionalReliabilityBucketRows = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcConditionalReliabilityRows = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcWinningSideCheckpointStats = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcWinningSideDistanceStats = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcWinningSideHeadline = EMPTY_BTC_WINNING_SIDE_HEADLINE,
-    btcWinningSideOutcomeSplit = EMPTY_BOUNDARY_MOVE_ROWS,
-    btcWinningSideOverview = EMPTY_BTC_WINNING_SIDE_OVERVIEW,
-    appliedFilters = EMPTY_APPLIED_FILTERS,
-    calibrationRows = [],
-    crossingDistributions = [],
-    headlineFinding = EMPTY_HEADLINE_FINDING,
-    overview = EMPTY_OVERVIEW,
-    thresholdStats = [],
-  } = analytics ?? {};
-  const activeCohortDrilldown =
-    cohortDrilldown === undefined ? EMPTY_COHORT_DRILLDOWN : cohortDrilldown;
-  const {
-    checkpointLabel: cohortCheckpointLabel,
-    checkpointSecond: cohortCheckpointSecond,
-    distanceBucketLabel: cohortDistanceBucketLabel,
-    hourRows: cohortHourRows,
-    hypotheses: cohortHypotheses,
-    lossRate: cohortLossRate,
-    loserCount: cohortLoserCount,
-    numericMetrics: cohortNumericMetrics,
-    sampleCount: cohortSampleCount,
-    selectionSide: cohortSide,
-    sessionRows: cohortSessionRows,
-    winRate: cohortWinRate,
-    winnerCount: cohortWinnerCount,
-  } = activeCohortDrilldown;
 
   return (
-    <section className="space-y-6">
-      <section className="rounded-[1.65rem] border border-black/10 bg-[linear-gradient(145deg,rgba(255,252,245,0.96),rgba(244,246,255,0.9))] p-6 shadow-[0_18px_54px_rgba(24,24,24,0.08)]">
-        <div className="flex flex-wrap items-end justify-between gap-5">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">
-              Stored-summary analytics
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-stone-950">
-              Threshold win rates, calibration, and crossing timing
-            </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-700">
-              Every number below is computed from stored `market_summaries`, not
-              browser-side replay reconstruction. Rows below the current minimum
-              support are hidden from the threshold and calibration tables.
-            </p>
-          </div>
-          <QualityPill quality={appliedFilters.quality} />
-        </div>
-
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          <ControlField label="Date range">
-            <FilterSelect
-              value={filters.dateRange}
-              onChange={(event) => updateFilter("dateRange", event.target.value)}
-              options={ANALYTICS_DATE_RANGE_OPTIONS}
-            />
-          </ControlField>
-
-          <ControlField label="Quality filter">
-            <FilterSelect
-              value={filters.quality}
-              onChange={(event) => updateFilter("quality", event.target.value)}
-              options={ANALYTICS_QUALITY_OPTIONS}
-            />
-          </ControlField>
-
-          <ControlField label="Minimum support">
-            <FilterSelect
-              value={filters.minSampleSize}
-              onChange={(event) =>
-                updateFilter("minSampleSize", event.target.value)
-              }
-              options={ANALYTICS_MIN_SAMPLE_OPTIONS}
-            />
-          </ControlField>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          eyebrow="Headline question"
-          title={headlineFinding.sampleCount > 0 ? formatProbability(headlineFinding.winRate) : "No sample"}
-          body={formatHeadlineFinding(headlineFinding)}
-        />
-        <StatCard
-          eyebrow="Filtered sample"
-          title={formatCount(overview.sampleCount)}
-          body="Finalized markets currently included by the filters above."
-        />
-        <StatCard
-          eyebrow="Outcome split"
-          title={`${formatCount(overview.upWins)} up / ${formatCount(overview.downWins)} down`}
-          body="Resolved outcome counts inside the filtered summary set."
-        />
-        <StatCard
-          eyebrow="Quality mix"
-          title={`${formatCount(overview.goodCount)} good`}
-          body={`${formatCount(overview.partialCount)} partial and ${formatCount(overview.gapCount)} gap rows remain in the filtered sample.`}
-        />
-        <StatCard
-          eyebrow="Window span"
-          title={overview.sampleCount > 0 ? "Covered" : "Empty"}
-          body={formatDateSpan(overview.windowStartMin, overview.windowStartMax)}
-        />
-      </section>
-
-      <TableShell
-        caption="5-minute BTC move"
-        title="How far BTC moves from price to beat to close"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This block uses stored market boundary references from `market_summaries`.
-          It prefers official prices when available and falls back to derived
-          Chainlink start/end references otherwise.
-        </p>
-
-        {boundaryMoveOverview.usableCount === 0 ? (
-          <EmptyTable message="No filtered markets currently have both a usable start and end BTC reference." />
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
-            <MetricPanel
-              label="Headline"
-              value={formatProbability(boundaryMoveHeadline.share)}
-              detail={formatBoundaryMoveHeadline(boundaryMoveHeadline)}
-            />
-            <MetricPanel
-              label="Usable sample"
-              value={formatCount(boundaryMoveOverview.usableCount)}
-              detail={`${formatCount(boundaryMoveOverview.excludedCount)} filtered market${boundaryMoveOverview.excludedCount === 1 ? "" : "s"} excluded because one boundary reference is missing.`}
-            />
-            <MetricPanel
-              label="Median abs move"
-              value={formatBtcUsd(boundaryMoveOverview.medianAbsMoveUsd)}
-              detail="Median absolute BTC move over the 5-minute market window."
-            />
-            <MetricPanel
-              label="P90 abs move"
-              value={formatBtcUsd(boundaryMoveOverview.p90AbsMoveUsd)}
-              detail="90th-percentile absolute move across usable 5-minute markets."
-            />
-            <MetricPanel
-              label="Max abs move"
-              value={formatBtcUsd(boundaryMoveOverview.maxAbsMoveUsd)}
-              detail="Largest absolute 5-minute move in the current filtered sample."
-            />
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Move thresholds"
-        title="Share of markets that move at least $20, $30, $40, and beyond"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          {formatSupportFloorMessage(
-            boundaryMoveOverview.usableCount,
-            appliedFilters.minSampleSize,
-          )}
-        </p>
-        {boundaryMoveThresholdStats.length === 0 ? (
-          <EmptyTable message="No BTC move threshold rows meet the current support floor." />
-        ) : (
-          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-            <table className="min-w-full text-left text-sm text-stone-700">
-              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Abs move threshold</th>
-                  <th className="px-4 py-3 font-semibold">Usable markets</th>
-                  <th className="px-4 py-3 font-semibold">Markets at or above</th>
-                  <th className="px-4 py-3 font-semibold">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {boundaryMoveThresholdStats.map((row) => (
-                  <tr
-                    key={row.thresholdUsd}
-                    className="border-t border-stone-200/80 bg-white"
-                  >
-                    <td className="px-4 py-3 font-medium text-stone-950">
-                      {formatBtcUsd(row.thresholdUsd)}
-                    </td>
-                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                    <td className="px-4 py-3">{formatCount(row.hitCount)}</td>
-                    <td className="px-4 py-3">{formatProbability(row.share)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Move distribution"
-        title="Absolute move distribution by BTC dollar bucket"
-      >
-        {boundaryMoveOverview.usableCount === 0 ? (
-          <EmptyTable message="No usable BTC boundary moves are available for bucketed distribution yet." />
-        ) : (
-          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-            <table className="min-w-full text-left text-sm text-stone-700">
-              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Abs move bucket</th>
-                  <th className="px-4 py-3 font-semibold">Markets</th>
-                  <th className="px-4 py-3 font-semibold">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {boundaryMoveBuckets.map((row) => (
-                  <tr key={row.label} className="border-t border-stone-200/80 bg-white">
-                    <td className="px-4 py-3 font-medium text-stone-950">
-                      {row.label}
-                    </td>
-                    <td className="px-4 py-3">{formatCount(row.count)}</td>
-                    <td className="px-4 py-3">{formatProbability(row.share)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Time-of-day split"
-        title="When 5-minute BTC markets tend to move more or less"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          These buckets are grouped by each market window's start time in
-          Eastern Time. Hours or sessions with fewer than{" "}
-          {formatCount(appliedFilters.minSampleSize)} usable market
-          {appliedFilters.minSampleSize === 1 ? "" : "s"} are hidden.
-        </p>
-        {boundaryMoveOverview.usableCount === 0 ? (
-          <EmptyTable message="No usable BTC boundary moves are available for ET hour/session analysis yet." />
-        ) : boundaryMoveByHour.length === 0 && boundaryMoveBySession.length === 0 ? (
-          <EmptyTable message="No ET hour or session buckets currently meet the support floor." />
-        ) : (
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                ET sessions
-              </p>
-              {boundaryMoveBySession.length === 0 ? (
-                <EmptyTable message="No ET session buckets currently meet the support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Session</th>
-                        <th className="px-4 py-3 font-semibold">ET range</th>
-                        <th className="px-4 py-3 font-semibold">Markets</th>
-                        <th className="px-4 py-3 font-semibold">Median abs move</th>
-                        <th className="px-4 py-3 font-semibold">Avg abs move</th>
-                        <th className="px-4 py-3 font-semibold">Share &gt;= $20</th>
-                        <th className="px-4 py-3 font-semibold">Share &gt;= $50</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {boundaryMoveBySession.map((row) => (
-                        <tr key={row.id} className="border-t border-stone-200/80 bg-white">
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {row.label}
-                          </td>
-                          <td className="px-4 py-3">{row.rangeLabel}</td>
-                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                          <td className="px-4 py-3">
-                            {formatBtcUsd(row.medianAbsMoveUsd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatBtcUsd(row.averageAbsMoveUsd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatProbability(row.shareAt20Usd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatProbability(row.shareAt50Usd)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                ET hour of day
-              </p>
-              {boundaryMoveByHour.length === 0 ? (
-                <EmptyTable message="No ET hour buckets currently meet the support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">ET hour</th>
-                        <th className="px-4 py-3 font-semibold">Markets</th>
-                        <th className="px-4 py-3 font-semibold">Median abs move</th>
-                        <th className="px-4 py-3 font-semibold">Avg abs move</th>
-                        <th className="px-4 py-3 font-semibold">Share &gt;= $20</th>
-                        <th className="px-4 py-3 font-semibold">Share &gt;= $50</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {boundaryMoveByHour.map((row) => (
-                        <tr
-                          key={row.hour}
-                          className="border-t border-stone-200/80 bg-white"
-                        >
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {row.label}
-                          </td>
-                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                          <td className="px-4 py-3">
-                            {formatBtcUsd(row.medianAbsMoveUsd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatBtcUsd(row.averageAbsMoveUsd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatProbability(row.shareAt20Usd)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatProbability(row.shareAt50Usd)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="BTC first winning side"
-        title="When BTC first reaches the eventual winning side"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This block answers a simpler question than the old lock metric: when
-          was BTC first on the eventual winning side of the anchor price? It
-          does not require BTC to stay there for the rest of the window.
-        </p>
-        <p className="mb-5 text-sm leading-7 text-stone-600">
-          Cadence mix: {formatCadenceMix(btcWinningSideCadenceMix)}
-        </p>
-
-        {btcWinningSideOverview.sampleCount === 0 ? (
-          <EmptyTable message="No finalized markets currently match the filters for BTC first-winning-side timing." />
-        ) : (
-          <div className="space-y-6">
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
-              <MetricPanel
-                label={`Reached by ${formatCheckpointLabel(btcWinningSideHeadline.checkpointSecond)}`}
-                value={
-                  btcWinningSideHeadline.sampleCount > 0
-                    ? formatProbability(btcWinningSideHeadline.share)
-                    : "No sample"
-                }
-                detail={formatBtcWinningSideHeadline(btcWinningSideHeadline)}
-              />
-              <MetricPanel
-                label="Matching sample"
-                value={`${formatCount(btcWinningSideOverview.matchingCount)} / ${formatCount(btcWinningSideOverview.sampleCount)}`}
-                detail="Markets with a non-null first BTC winning-side second inside the filtered summary set."
-              />
-              <MetricPanel
-                label="Median first match"
-                value={formatRelativeSecondWithClock(btcWinningSideOverview.medianWinningSideSecond)}
-                detail="Median earliest observed second when BTC first reached the eventual winning side."
-              />
-              <MetricPanel
-                label="P25 first match"
-                value={formatRelativeSecondWithClock(btcWinningSideOverview.p25WinningSideSecond)}
-                detail="25th-percentile first-winning-side timing across matching markets."
-              />
-              <MetricPanel
-                label="P75 first match"
-                value={formatRelativeSecondWithClock(btcWinningSideOverview.p75WinningSideSecond)}
-                detail="75th-percentile first-winning-side timing across matching markets."
-              />
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Best signals
-              </p>
-              <p className="max-w-3xl text-sm leading-7 text-stone-700">
-                These cards pick the strongest non-overlapping BTC-distance bucket
-                at the actionable checkpoints only, with a hard minimum support floor
-                of {` ${formatCount(btcBestSignalMinSamples)} `}samples.
-              </p>
-              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                {btcBestSignalCards.map((card) => (
-                  <MetricPanel
-                    key={`${card.checkpointSecond}-${card.side}`}
-                    label={`Best ${formatSideLabel(card.side)} at ${formatCheckpointLabel(
-                      card.checkpointSecond,
-                    )}`}
-                    value={
-                      card.bucketLabel == null
-                        ? "No signal"
-                        : formatProbability(card.winRate)
-                    }
-                    detail={formatBestSignalDetail(card, btcBestSignalMinSamples)}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Price-edge context
-              </p>
-              <p className="max-w-3xl text-sm leading-7 text-stone-700">
-                Secondary read: this compares the historical win rate for a
-                BTC-distance bucket against the average market price for that
-                same side. It is useful for value/execution questions, but the
-                accuracy-first rule ranking below does not require positive edge.
-              </p>
-              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                {btcMarketEdgeCards.map((card) => (
-                  <MetricPanel
-                    key={`${card.checkpointSecond}-${card.side}`}
-                    label={`Best ${formatSideLabel(card.side)} edge at ${formatCheckpointLabel(
-                      card.checkpointSecond,
-                    )}`}
-                    value={
-                      card.bucketLabel == null
-                        ? "No edge"
-                        : formatCalibrationGap(card.averageEdge)
-                    }
-                    detail={formatEdgeDetail(card, btcMarketEdgeMinSamples)}
-                  />
-                ))}
-              </div>
-              {btcMarketEdgeBucketRows.length === 0 ? (
-                <EmptyTable message="No BTC signal vs market-price edge rows meet the current support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                        <th className="px-4 py-3 font-semibold">BTC side</th>
-                        <th className="px-4 py-3 font-semibold">Distance bucket</th>
-                        <th className="px-4 py-3 font-semibold">Samples</th>
-                        <th className="px-4 py-3 font-semibold">Avg market price</th>
-                        <th className="px-4 py-3 font-semibold">Realized win rate</th>
-                        <th className="px-4 py-3 font-semibold">Edge</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {btcMarketEdgeBucketRows.map((row) => (
-                        <tr
-                          key={`${row.checkpoint}-${row.side}-${row.minUsd}`}
-                          className="border-t border-stone-200/80 bg-white"
-                        >
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {formatCheckpointLabel(row.checkpointSecond)}
-                          </td>
-                          <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                          <td className="px-4 py-3">{row.bucketLabel}</td>
-                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                          <td className="px-4 py-3">
-                            {formatProbability(row.averageDisplayedProbability)}
-                          </td>
-                          <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                          <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
-              <div className="space-y-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  First winning-side by checkpoint
-                </p>
-                {btcWinningSideCheckpointStats.length === 0 ? (
-                  <EmptyTable message="No BTC first-winning-side checkpoint rows meet the current support floor." />
-                ) : (
-                  <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                    <table className="min-w-full text-left text-sm text-stone-700">
-                      <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                        <tr>
-                          <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                          <th className="px-4 py-3 font-semibold">Markets</th>
-                        <th className="px-4 py-3 font-semibold">Reached winning side</th>
-                        <th className="px-4 py-3 font-semibold">Share</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                        {btcWinningSideCheckpointStats.map((row) => (
-                          <tr
-                            key={row.checkpointSecond}
-                            className="border-t border-stone-200/80 bg-white"
-                          >
-                            <td className="px-4 py-3 font-medium text-stone-950">
-                              {formatCheckpointLabel(row.checkpointSecond)}
-                            </td>
-                            <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                            <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
-                            <td className="px-4 py-3">{formatProbability(row.share)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  Outcome split
-                </p>
-                {btcWinningSideOutcomeSplit.length === 0 ? (
-                  <EmptyTable message="No Up/Down BTC first-winning-side rows meet the current support floor." />
-                ) : (
-                  <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                    <table className="min-w-full text-left text-sm text-stone-700">
-                      <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                        <tr>
-                        <th className="px-4 py-3 font-semibold">Outcome</th>
-                        <th className="px-4 py-3 font-semibold">Markets</th>
-                        <th className="px-4 py-3 font-semibold">Reached side</th>
-                        <th className="px-4 py-3 font-semibold">Share</th>
-                        <th className="px-4 py-3 font-semibold">Median first match</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                        {btcWinningSideOutcomeSplit.map((row) => (
-                          <tr key={row.side} className="border-t border-stone-200/80 bg-white">
-                            <td className="px-4 py-3 font-medium text-stone-950">
-                              {formatSideLabel(row.side)}
-                            </td>
-                            <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                            <td className="px-4 py-3">{formatCount(row.matchingCount)}</td>
-                            <td className="px-4 py-3">{formatProbability(row.share)}</td>
-                            <td className="px-4 py-3">
-                              {formatRelativeSecondWithClock(row.medianWinningSideSecond)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="rounded-[1.2rem] border border-black/10 bg-stone-50 px-5 py-4 text-sm leading-7 text-stone-700">
-                  <p>
-                    Conflicts: {formatCount(btcWinningSideOverview.conflictCount)} BTC-path
-                    vs resolved-outcome disagreements.
-                  </p>
-                  <p>
-                    Never reached winning side: {formatCount(btcWinningSideOverview.neverMatchedCount)} filtered markets.
-                  </p>
-                  <p>
-                    Missing anchor / no BTC data: {formatCount(btcWinningSideOverview.missingAnchorCount)} /
-                    {" "}
-                    {formatCount(btcWinningSideOverview.noBtcDataCount)}.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Winning-side distance thresholds
-              </p>
-              {btcWinningSideDistanceStats.length === 0 ? (
-                <EmptyTable message="No BTC winning-side-by-distance rows meet the current support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Winning-side distance</th>
-                        <th className="px-4 py-3 font-semibold">Reached</th>
-                        <th className="px-4 py-3 font-semibold">Median first match</th>
-                        <th className="px-4 py-3 font-semibold">By 0:15</th>
-                        <th className="px-4 py-3 font-semibold">By 0:30</th>
-                        <th className="px-4 py-3 font-semibold">By 1:00</th>
-                        <th className="px-4 py-3 font-semibold">By 2:00</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {btcWinningSideDistanceStats.map((row) => {
-                        const by15 = row.checkpointStats.find(
-                          (item) => item.checkpointSecond === 15,
-                        );
-                        const by30 = row.checkpointStats.find(
-                          (item) => item.checkpointSecond === 30,
-                        );
-                        const by60 = row.checkpointStats.find(
-                          (item) => item.checkpointSecond === 60,
-                        );
-                        const by120 = row.checkpointStats.find(
-                          (item) => item.checkpointSecond === 120,
-                        );
-
-                        return (
-                          <tr
-                            key={row.thresholdUsd}
-                            className="border-t border-stone-200/80 bg-white"
-                          >
-                            <td className="px-4 py-3 font-medium text-stone-950">
-                              {formatBtcUsd(row.thresholdUsd)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatCount(row.matchingCount)} / {formatProbability(row.share)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatRelativeSecondWithClock(row.medianWinningSideSecond)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatProbability(by15?.share)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatProbability(by30?.share)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatProbability(by60?.share)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {formatProbability(by120?.share)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Conditional outcome reliability
-              </p>
-              <p className="max-w-3xl text-sm leading-7 text-stone-700">
-                This asks the predictive question directly: at a given checkpoint,
-                if BTC is above or below the anchor by at least a threshold amount,
-                how often does that side actually win? These are cumulative
-                thresholds, so the $30 rows are nested inside the $10 and $20 rows.
-              </p>
-              {btcConditionalReliabilityRows.length === 0 ? (
-                <EmptyTable message="No BTC conditional reliability rows meet the current support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                        <th className="px-4 py-3 font-semibold">BTC side</th>
-                        <th className="px-4 py-3 font-semibold">Threshold</th>
-                        <th className="px-4 py-3 font-semibold">Samples</th>
-                        <th className="px-4 py-3 font-semibold">Avg BTC delta</th>
-                        <th className="px-4 py-3 font-semibold">Win rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {btcConditionalReliabilityRows.map((row) => (
-                        <tr
-                          key={`${row.checkpoint}-${row.side}-${row.thresholdUsd}`}
-                          className="border-t border-stone-200/80 bg-white"
-                        >
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {formatCheckpointLabel(row.checkpointSecond)}
-                          </td>
-                          <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                          <td className="px-4 py-3">{formatBtcUsd(row.thresholdUsd)}</td>
-                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                          <td className="px-4 py-3">{formatBtcUsd(row.averageDeltaUsd)}</td>
-                          <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Distance buckets
-              </p>
-              <p className="max-w-3xl text-sm leading-7 text-stone-700">
-                These rows are non-overlapping BTC distance buckets, which makes
-                the predictive strength easier to compare than the cumulative
-                threshold table above.
-              </p>
-              {btcConditionalReliabilityBucketRows.length === 0 ? (
-                <EmptyTable message="No BTC distance-bucket reliability rows meet the current support floor." />
-              ) : (
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                        <th className="px-4 py-3 font-semibold">BTC side</th>
-                        <th className="px-4 py-3 font-semibold">Distance bucket</th>
-                        <th className="px-4 py-3 font-semibold">Samples</th>
-                        <th className="px-4 py-3 font-semibold">Avg BTC delta</th>
-                        <th className="px-4 py-3 font-semibold">Win rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {btcConditionalReliabilityBucketRows.map((row) => (
-                        <tr
-                          key={`${row.checkpoint}-${row.side}-${row.minUsd}`}
-                          className="border-t border-stone-200/80 bg-white"
-                        >
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {formatCheckpointLabel(row.checkpointSecond)}
-                          </td>
-                          <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                          <td className="px-4 py-3">{row.bucketLabel}</td>
-                          <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                          <td className="px-4 py-3">{formatBtcUsd(row.averageDeltaUsd)}</td>
-                          <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Cohort drilldown"
-        title="Why the selected BTC bucket still fails sometimes"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This block compares winners and losers inside one BTC checkpoint cohort.
-          The default view is the exact `T+120 / Down / $30-$49.99` row that
-          raised the question about why a meaningful share of those markets still
-          flipped before the close.
-        </p>
-
-        <div className="mb-6 grid gap-4 lg:grid-cols-3">
-          <ControlField label="Checkpoint">
-            <FilterSelect
-              value={cohortSelection.checkpoint}
-              onChange={(event) =>
-                updateCohortSelection("checkpoint", event.target.value)
-              }
-              options={COHORT_DRILLDOWN_CHECKPOINT_OPTIONS}
-            />
-          </ControlField>
-          <ControlField label="BTC side">
-            <FilterSelect
-              value={cohortSelection.side}
-              onChange={(event) =>
-                updateCohortSelection("side", event.target.value)
-              }
-              options={COHORT_DRILLDOWN_SIDE_OPTIONS}
-            />
-          </ControlField>
-          <ControlField label="Distance bucket">
-            <FilterSelect
-              value={cohortSelection.distanceBucket}
-              onChange={(event) =>
-                updateCohortSelection("distanceBucket", event.target.value)
-              }
-              options={COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS}
-            />
-          </ControlField>
-        </div>
-
-        {cohortDrilldown === undefined ? (
-          <EmptyTable message="Loading cohort drilldown..." />
-        ) : cohortSampleCount === 0 ? (
-          <EmptyTable message="No finalized markets match the selected checkpoint, side, distance bucket, and filters." />
-        ) : (
-          <div className="space-y-6">
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-              <MetricPanel
-                label="Selected cohort"
-                value={`${formatSideLabel(cohortSide)} ${cohortDistanceBucketLabel}`}
-                detail={`${formatCheckpointLabel(
-                  cohortCheckpointSecond,
-                )} with ${formatCount(cohortSampleCount)} filtered market${cohortSampleCount === 1 ? "" : "s"} in the bucket.`}
-              />
-              <MetricPanel
-                label="Cohort win rate"
-                value={formatProbability(cohortWinRate.rate)}
-                detail={`${formatCount(cohortWinnerCount)} wins out of ${formatCount(
-                  cohortSampleCount,
-                )}. ${formatProbabilityCi(cohortWinRate)}`}
-              />
-              <MetricPanel
-                label="Cohort loss rate"
-                value={formatProbability(cohortLossRate.rate)}
-                detail={`${formatCount(cohortLoserCount)} losses out of ${formatCount(
-                  cohortSampleCount,
-                )}. ${formatProbabilityCi(cohortLossRate)}`}
-              />
-              <MetricPanel
-                label="Question"
-                value="Winners vs losers"
-                detail={`What separated the ${formatSideLabel(
-                  cohortSide,
-                )} winners from the failures inside ${cohortCheckpointLabel} / ${cohortDistanceBucketLabel}?`}
-              />
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Numeric comparisons
-              </p>
-              <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                <table className="min-w-full text-left text-sm text-stone-700">
-                  <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">Metric</th>
-                      <th className="px-4 py-3 font-semibold">
-                        {formatSideLabel(cohortSide)} winners
-                      </th>
-                      <th className="px-4 py-3 font-semibold">Losers</th>
-                      <th className="px-4 py-3 font-semibold">Winner - loser</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cohortNumericMetrics.map((metric) => (
-                      <tr
-                        key={metric.id}
-                        className="border-t border-stone-200/80 bg-white align-top"
-                      >
-                        <td className="px-4 py-3 font-medium text-stone-950">
-                          {metric.label}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <p className="font-medium text-stone-950">
-                              {formatValueByMetric(metric.winners.mean, metric.format)}
-                            </p>
-                            <p className="text-xs text-stone-500">
-                              {formatCount(metric.winners.sampleCount)} observations
-                            </p>
-                            <p className="text-xs text-stone-500">
-                              {formatRangeCi(
-                                metric.winners.ciLow,
-                                metric.winners.ciHigh,
-                                (value) => formatValueByMetric(value, metric.format),
-                              )}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <p className="font-medium text-stone-950">
-                              {formatValueByMetric(metric.losers.mean, metric.format)}
-                            </p>
-                            <p className="text-xs text-stone-500">
-                              {formatCount(metric.losers.sampleCount)} observations
-                            </p>
-                            <p className="text-xs text-stone-500">
-                              {formatRangeCi(
-                                metric.losers.ciLow,
-                                metric.losers.ciHigh,
-                                (value) => formatValueByMetric(value, metric.format),
-                              )}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <p className="font-medium text-stone-950">
-                              {formatValueByMetric(metric.difference.mean, metric.format)}
-                            </p>
-                            <p className="text-xs text-stone-500">
-                              {formatRangeCi(
-                                metric.difference.ciLow,
-                                metric.difference.ciHigh,
-                                (value) => formatValueByMetric(value, metric.format),
-                              )}
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <div className="space-y-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  ET session loss rates
-                </p>
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Session</th>
-                        <th className="px-4 py-3 font-semibold">Total</th>
-                        <th className="px-4 py-3 font-semibold">Wins</th>
-                        <th className="px-4 py-3 font-semibold">Losses</th>
-                        <th className="px-4 py-3 font-semibold">Loss rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cohortSessionRows.map((row) => (
-                        <tr key={row.id} className="border-t border-stone-200/80 bg-white">
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {row.label}
-                          </td>
-                          <td className="px-4 py-3">{formatCount(row.totalCount)}</td>
-                          <td className="px-4 py-3">{formatCount(row.winnerCount)}</td>
-                          <td className="px-4 py-3">{formatCount(row.loserCount)}</td>
-                          <td className="px-4 py-3">
-                            <div className="space-y-1">
-                              <p className="font-medium text-stone-950">
-                                {formatProbability(row.lossRate.rate)}
-                              </p>
-                              <p className="text-xs text-stone-500">
-                                {formatProbabilityCi(row.lossRate)}
-                              </p>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  ET hour loss rates
-                </p>
-                <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-                  <table className="min-w-full text-left text-sm text-stone-700">
-                    <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">ET hour</th>
-                        <th className="px-4 py-3 font-semibold">Total</th>
-                        <th className="px-4 py-3 font-semibold">Wins</th>
-                        <th className="px-4 py-3 font-semibold">Losses</th>
-                        <th className="px-4 py-3 font-semibold">Loss rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cohortHourRows.map((row) => (
-                        <tr
-                          key={row.hour}
-                          className="border-t border-stone-200/80 bg-white"
-                        >
-                          <td className="px-4 py-3 font-medium text-stone-950">
-                            {row.label}
-                          </td>
-                          <td className="px-4 py-3">{formatCount(row.totalCount)}</td>
-                          <td className="px-4 py-3">{formatCount(row.winnerCount)}</td>
-                          <td className="px-4 py-3">{formatCount(row.loserCount)}</td>
-                          <td className="px-4 py-3">
-                            <div className="space-y-1">
-                              <p className="font-medium text-stone-950">
-                                {formatProbability(row.lossRate.rate)}
-                              </p>
-                              <p className="text-xs text-stone-500">
-                                {formatProbabilityCi(row.lossRate)}
-                              </p>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Hypothesis results
-              </p>
-              <div className="grid gap-4 xl:grid-cols-2">
-                {cohortHypotheses.map((hypothesis) => (
-                  <article
-                    key={hypothesis.id}
-                    className="rounded-[1.2rem] border border-black/10 bg-white p-5"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-                          {hypothesis.id.toUpperCase()}
-                        </p>
-                        <h4 className="mt-2 text-lg font-semibold tracking-[-0.03em] text-stone-950">
-                          {hypothesis.label}
-                        </h4>
-                      </div>
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getToneClasses(
-                          getStatusTone(hypothesis.status),
-                        )}`}
-                      >
-                        {formatStatusLabel(hypothesis.status)}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <div className="rounded-[1rem] bg-stone-50 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">
-                          {hypothesis.groupALabel}
-                        </p>
-                        <p className="mt-2 text-lg font-semibold text-stone-950">
-                          {formatProbability(hypothesis.groupA.rate)}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {formatProbabilityCi(hypothesis.groupA)}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {formatCount(hypothesis.groupA.sampleCount)} rows
-                        </p>
-                      </div>
-                      <div className="rounded-[1rem] bg-stone-50 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">
-                          {hypothesis.groupBLabel}
-                        </p>
-                        <p className="mt-2 text-lg font-semibold text-stone-950">
-                          {formatProbability(hypothesis.groupB.rate)}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {formatProbabilityCi(hypothesis.groupB)}
-                        </p>
-                        <p className="mt-1 text-xs text-stone-500">
-                          {formatCount(hypothesis.groupB.sampleCount)} rows
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="mt-4 text-sm leading-7 text-stone-700">
-                      Difference: {formatRateDifference(hypothesis.difference.difference)}.
-                      {" "}
-                      {formatRangeCi(
-                        hypothesis.difference.ciLow,
-                        hypothesis.difference.ciHigh,
-                        formatRateDifference,
-                      )}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Accuracy-first rules"
-        title="Rule ranking by win rate, support, coverage, and time left"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This is the accuracy-first shortlist for live calls. It ignores price
-          edge as a gate and keeps only BTC distance + signal-quality setups with
-          at least {formatCount(btcCandidateRulesMinSamples)} samples and realized
-          win rate of at least {formatProbability(btcCandidateRulesMinWinRate)}.
-          Coverage is the share of filtered markets matching the rule, and the
-          recent holdout uses the newest {formatProbability(btcCandidateRulesHoldoutShare)}
-          of matching rows as a sanity check.
-        </p>
-
-        {btcCandidateRules.length === 0 ? (
-          <EmptyTable message="No signal-quality rows currently clear the accuracy-first rule floor." />
-        ) : (
-          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-            <table className="min-w-full text-left text-sm text-stone-700">
-              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                  <th className="px-4 py-3 font-semibold">BTC side</th>
-                  <th className="px-4 py-3 font-semibold">Distance bucket</th>
-                  <th className="px-4 py-3 font-semibold">Quality bucket</th>
-                  <th className="px-4 py-3 font-semibold">Samples</th>
-                  <th className="px-4 py-3 font-semibold">Coverage</th>
-                  <th className="px-4 py-3 font-semibold">Avg quality</th>
-                  <th className="px-4 py-3 font-semibold">Win rate</th>
-                  <th className="px-4 py-3 font-semibold">Recent holdout</th>
-                  <th className="px-4 py-3 font-semibold">Time left</th>
-                </tr>
-              </thead>
-              <tbody>
-                {btcCandidateRules.map((row) => (
-                  <tr
-                    key={`${row.checkpoint}-${row.side}-${row.distanceBucketId}-${row.qualityBucketId}`}
-                    className="border-t border-stone-200/80 bg-white"
-                  >
-                    <td className="px-4 py-3 font-medium text-stone-950">
-                      {formatCheckpointLabel(row.checkpointSecond)}
-                    </td>
-                    <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                    <td className="px-4 py-3">{row.distanceBucketLabel}</td>
-                    <td className="px-4 py-3">{row.qualityBucketLabel}</td>
-                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                    <td className="px-4 py-3">{formatProbability(row.coverageShare)}</td>
-                    <td className="px-4 py-3">
-                      {formatSignalQualityScore(row.averageSignalQualityScore)}
-                    </td>
-                    <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                    <td className="px-4 py-3">
-                      <div className="space-y-1">
-                        <p className="font-medium text-stone-950">
-                          {formatProbability(row.holdoutWinRate)}
-                        </p>
-                        <p className="text-xs text-stone-500">
-                          {formatCount(row.holdoutWinCount)} /{" "}
-                          {formatCount(row.holdoutSampleCount)} newest
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {formatOffsetClock(row.timeLeftSeconds)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Signal quality"
-        title="BTC signal quality with price-edge context"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          This layer asks whether the BTC signal was not just large, but also
-          clean relative to the path BTC took into the checkpoint. Signal
-          quality is `abs(delta from anchor) / BTC path length to checkpoint`,
-          so higher values mean more net movement and less churn. The edge
-          columns here are secondary pricing context, not the live-call gate.
-        </p>
-
-        <div className="space-y-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-            Best clean-signal edges
-          </p>
-          <p className="max-w-3xl text-sm leading-7 text-stone-700">
-            These cards pick the strongest positive edge rows after splitting the
-            existing BTC-distance buckets by signal-quality bucket, with a hard
-            minimum support floor of {` ${formatCount(btcSignalQualityEdgeMinSamples)} `}
-            samples.
-          </p>
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            {btcSignalQualityEdgeCards.map((card) => (
-              <MetricPanel
-                key={`${card.checkpointSecond}-${card.side}`}
-                label={`Best ${formatSideLabel(card.side)} quality edge at ${formatCheckpointLabel(
-                  card.checkpointSecond,
-                )}`}
-                value={
-                  card.distanceBucketLabel == null
-                    ? "No edge"
-                    : formatCalibrationGap(card.averageEdge)
-                }
-                detail={formatSignalQualityEdgeDetail(
-                  card,
-                  btcSignalQualityEdgeMinSamples,
-                )}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-6 space-y-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-            Distance bucket by signal quality
-          </p>
-          {btcSignalQualityEdgeBucketRows.length === 0 ? (
-            <EmptyTable message="No BTC signal-quality edge rows meet the current support floor." />
-          ) : (
-            <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-              <table className="min-w-full text-left text-sm text-stone-700">
-                <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                    <th className="px-4 py-3 font-semibold">BTC side</th>
-                    <th className="px-4 py-3 font-semibold">Distance bucket</th>
-                    <th className="px-4 py-3 font-semibold">Quality bucket</th>
-                    <th className="px-4 py-3 font-semibold">Samples</th>
-                    <th className="px-4 py-3 font-semibold">Avg quality</th>
-                    <th className="px-4 py-3 font-semibold">Avg market price</th>
-                    <th className="px-4 py-3 font-semibold">Realized win rate</th>
-                    <th className="px-4 py-3 font-semibold">Edge</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {btcSignalQualityEdgeBucketRows.map((row) => (
-                    <tr
-                      key={`${row.checkpoint}-${row.side}-${row.distanceBucketId}-${row.qualityBucketId}`}
-                      className="border-t border-stone-200/80 bg-white"
-                    >
-                      <td className="px-4 py-3 font-medium text-stone-950">
-                        {formatCheckpointLabel(row.checkpointSecond)}
-                      </td>
-                      <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                      <td className="px-4 py-3">{row.distanceBucketLabel}</td>
-                      <td className="px-4 py-3">{row.qualityBucketLabel}</td>
-                      <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                      <td className="px-4 py-3">
-                        {formatSignalQualityScore(row.averageSignalQualityScore)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {formatProbability(row.averageDisplayedProbability)}
-                      </td>
-                      <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                      <td className="px-4 py-3">{formatCalibrationGap(row.averageEdge)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </TableShell>
-
-      <TableShell
-        caption="Threshold stats"
-        title="Win rate when displayed probability clears a threshold"
-      >
-        {thresholdStats.length === 0 ? (
-          <EmptyTable message="No threshold rows meet the current filter and support floor." />
-        ) : (
-          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-            <table className="min-w-full text-left text-sm text-stone-700">
-              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                  <th className="px-4 py-3 font-semibold">Side</th>
-                  <th className="px-4 py-3 font-semibold">Threshold</th>
-                  <th className="px-4 py-3 font-semibold">Samples</th>
-                  <th className="px-4 py-3 font-semibold">Avg shown</th>
-                  <th className="px-4 py-3 font-semibold">Win rate</th>
-                </tr>
-              </thead>
-              <tbody>
-                {thresholdStats.map((row) => (
-                  <tr key={`${row.checkpoint}-${row.side}-${row.threshold}`} className="border-t border-stone-200/80 bg-white">
-                    <td className="px-4 py-3 font-medium text-stone-950">
-                      {row.checkpointLabel}
-                    </td>
-                    <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                    <td className="px-4 py-3">{formatProbability(row.threshold)}</td>
-                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                    <td className="px-4 py-3">
-                      {formatProbability(row.averageDisplayed)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {formatProbability(row.winRate)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Calibration"
-        title="Displayed probability versus realized win rate"
-      >
-        <p className="mb-5 max-w-3xl text-sm leading-7 text-stone-700">
-          Gap is computed as realized win rate minus average displayed probability.
-          Positive values mean the market was underconfident; negative values mean
-          it was overconfident.
-        </p>
-        {calibrationRows.length === 0 ? (
-          <EmptyTable message="No calibration rows meet the current filter and support floor." />
-        ) : (
-          <div className="overflow-auto rounded-[1.2rem] border border-black/10">
-            <table className="min-w-full text-left text-sm text-stone-700">
-              <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.18em] text-stone-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Checkpoint</th>
-                  <th className="px-4 py-3 font-semibold">Side</th>
-                  <th className="px-4 py-3 font-semibold">Bucket</th>
-                  <th className="px-4 py-3 font-semibold">Samples</th>
-                  <th className="px-4 py-3 font-semibold">Avg shown</th>
-                  <th className="px-4 py-3 font-semibold">Win rate</th>
-                  <th className="px-4 py-3 font-semibold">Gap</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calibrationRows.map((row) => (
-                  <tr
-                    key={`${row.checkpoint}-${row.side}-${row.bucketStart}`}
-                    className="border-t border-stone-200/80 bg-white"
-                  >
-                    <td className="px-4 py-3 font-medium text-stone-950">
-                      {row.checkpointLabel}
-                    </td>
-                    <td className="px-4 py-3">{formatSideLabel(row.side)}</td>
-                    <td className="px-4 py-3">{row.bucketLabel}</td>
-                    <td className="px-4 py-3">{formatCount(row.sampleCount)}</td>
-                    <td className="px-4 py-3">
-                      {formatProbability(row.averageDisplayed)}
-                    </td>
-                    <td className="px-4 py-3">{formatProbability(row.winRate)}</td>
-                    <td className="px-4 py-3">
-                      {formatCalibrationGap(row.calibrationGap)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </TableShell>
-
-      <TableShell
-        caption="Crossing timing"
-        title="When the market first clears key Up thresholds"
-      >
-        {overview.sampleCount === 0 ? (
-          <EmptyTable message="No finalized market summaries match the current filters." />
-        ) : (
-          <div className="grid gap-4 xl:grid-cols-3">
-            {crossingDistributions.map((distribution) => (
-              <CrossingDistribution
-                key={distribution.threshold}
-                distribution={distribution}
-              />
-            ))}
-          </div>
-        )}
-      </TableShell>
-    </section>
+    <div className="space-y-5">
+      <DatasetEligibility health={health} stability={stability} />
+      <Leader stability={stability} />
+      <StabilitySection computedAt={computedAt} stability={stability} />
+      <p className="text-right text-xs text-stone-500">
+        Rollup computed {dateTime(computedAt)} UTC
+      </p>
+    </div>
   );
 }

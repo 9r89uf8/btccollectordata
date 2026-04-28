@@ -66,6 +66,30 @@ If the change includes Convex backend code, the normal order is:
 2. Deploy/update Convex
 3. Update the Droplet if collector/shared code changed
 
+## Decision Engine Rollout Checks
+
+For decision-engine changes, both the Droplet env flag and Convex runtime flags
+must allow shadow logging.
+
+On the Droplet, confirm `/etc/btcgt/collector.env` contains:
+
+```bash
+ENABLE_DECISION_ENGINE=true
+DECISION_PERSIST_OFF_CHECKPOINT_WAITS=false
+```
+
+Keep runtime action emission muted for shadow validation:
+
+```bash
+npx convex run internal/runtimeFlags:ensureDecisionRuntimeFlagDefaults '{}'
+npx convex run internal/runtimeFlags:setDecisionRuntimeFlag '{"key":"decision_engine_enabled","value":true}'
+npx convex run internal/runtimeFlags:setDecisionRuntimeFlag '{"key":"decision_emit_actions","value":"wait_only"}'
+```
+
+After the collector restarts, wait for one or two target checkpoint windows to
+close, then check `/decisions`. A strict policy should still produce `WAIT`
+rows. It may produce zero ENTER candidates until the policy is eased.
+
 ## Success Signals
 
 After restart, you want to see:
@@ -74,6 +98,8 @@ After restart, you want to see:
 - no `Convex ingest failed` errors
 - no `active market refresh failed` errors
 - normal collector startup logs
+- `/decisions` shows recent decision rows once target checkpoints close
+- muted would-have-entered rows show as `WAIT` with `actionPreMute`
 
 Useful commands:
 

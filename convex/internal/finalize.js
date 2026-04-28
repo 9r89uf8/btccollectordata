@@ -8,6 +8,8 @@ import {
 } from "../_generated/server";
 import { buildMarketSummary } from "../../packages/shared/src/summary.js";
 import { getBoundaryReferences } from "./btcReferences.js";
+import { materializeMarketAnalyticsForSlug } from "./marketAnalytics.js";
+import { materializeMarketStabilityAnalyticsForSlug } from "./marketStabilityAnalytics.js";
 
 async function getMarketBySlug(ctx, slug) {
   return await ctx.db
@@ -28,6 +30,17 @@ async function getSnapshotsByMarketSlug(ctx, slug) {
     .query("market_snapshots_1s")
     .withIndex("by_marketSlug_ts", (q) => q.eq("marketSlug", slug))
     .collect();
+}
+
+async function materializeAnalyticsForFinalizedMarket(ctx, { nowTs, slug }) {
+  await materializeMarketAnalyticsForSlug(ctx, {
+    nowTs,
+    slug,
+  });
+  await materializeMarketStabilityAnalyticsForSlug(ctx, {
+    nowTs,
+    slug,
+  });
 }
 
 async function listEndedMarketsPage(ctx, { beforeWindowEndTs, limit, nowTs }) {
@@ -107,6 +120,18 @@ async function finalizeOneMarket(ctx, market, { force = false, nowTs }) {
   if (result.summary.resolvedOutcome == null) {
     await ctx.db.patch(market._id, marketPatch);
 
+    try {
+      await materializeAnalyticsForFinalizedMarket(ctx, {
+        nowTs,
+        slug: market.slug,
+      });
+    } catch (error) {
+      console.warn("[analytics] failed to materialize missing-outcome market", {
+        error: error?.message ?? String(error),
+        slug: market.slug,
+      });
+    }
+
     return {
       dataQuality: result.dataQuality,
       liveSnapshotCount: result.meta.liveSnapshotCount,
@@ -123,6 +148,18 @@ async function finalizeOneMarket(ctx, market, { force = false, nowTs }) {
   }
 
   await ctx.db.patch(market._id, marketPatch);
+
+  try {
+    await materializeAnalyticsForFinalizedMarket(ctx, {
+      nowTs,
+      slug: market.slug,
+    });
+  } catch (error) {
+    console.warn("[analytics] failed to materialize finalized market", {
+      error: error?.message ?? String(error),
+      slug: market.slug,
+    });
+  }
 
   return {
     dataQuality: result.dataQuality,

@@ -1,200 +1,121 @@
+import { query } from "./_generated/server";
 import { v } from "convex/values";
 
-import { query } from "./_generated/server";
 import {
-  ANALYTICS_DATE_RANGE_OPTIONS,
-  COHORT_DRILLDOWN_CHECKPOINT_OPTIONS,
-  COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS,
-  COHORT_DRILLDOWN_SIDE_OPTIONS,
-  ANALYTICS_MIN_SAMPLE_OPTIONS,
-  buildAnalyticsReport,
-  buildCohortDrilldownReport,
-} from "../packages/shared/src/analytics.js";
+  DASHBOARD_ROLLUP_KEY,
+  buildAnalyticsDashboard,
+} from "../packages/shared/src/analyticsDashboard.js";
 
-const analyticsDateRangeValue = v.union(
-  ...ANALYTICS_DATE_RANGE_OPTIONS.map((option) => v.literal(option.id)),
-);
-const cohortCheckpointValue = v.union(
-  ...COHORT_DRILLDOWN_CHECKPOINT_OPTIONS.map((option) => v.literal(option.id)),
-);
-const cohortDistanceBucketValue = v.union(
-  ...COHORT_DRILLDOWN_DISTANCE_BUCKET_OPTIONS.map((option) =>
-    v.literal(option.id),
-  ),
-);
-const cohortSideValue = v.union(
-  ...COHORT_DRILLDOWN_SIDE_OPTIONS.map((option) => v.literal(option.id)),
-);
-
-function getDateRangeStart(dateRange, nowTs) {
-  const option = ANALYTICS_DATE_RANGE_OPTIONS.find((item) => item.id === dateRange);
-
-  if (!option || option.lookbackMs == null) {
-    return null;
-  }
-
-  return nowTs - option.lookbackMs;
-}
-
-async function listCandidateSummaries(ctx, dateRange, nowTs) {
-  const windowStartFrom = getDateRangeStart(dateRange, nowTs);
-
-  if (windowStartFrom == null) {
-    return await ctx.db.query("market_summaries").collect();
-  }
-
+async function getRollup(ctx) {
   return await ctx.db
-    .query("market_summaries")
-    .withIndex("by_windowStartTs", (q) =>
-      q.gte("windowStartTs", windowStartFrom),
-    )
-    .collect();
+    .query("analytics_dashboard_rollups")
+    .withIndex("by_key", (q) => q.eq("key", DASHBOARD_ROLLUP_KEY))
+    .unique();
 }
 
-async function listMarketsForSummaries(ctx, summaries) {
-  const missingQualitySlugs = [...new Set(
-    summaries
-      .filter((summary) => summary.dataQuality == null)
-      .map((summary) => summary.marketSlug),
-  )];
-
-  if (missingQualitySlugs.length === 0) {
-    return [];
+function fromRollup(rollup) {
+  if (!rollup) {
+    return buildAnalyticsDashboard({
+      analyticsRows: [],
+      stabilityRows: [],
+    });
   }
 
-  const markets = await Promise.all(
-    missingQualitySlugs.map((slug) =>
-      ctx.db
-        .query("markets")
-        .withIndex("by_slug", (q) => q.eq("slug", slug))
-        .unique(),
-    ),
-  );
-
-  return markets.filter(Boolean);
+  return {
+    computedAt: rollup.computedAt,
+    health: rollup.v1?.health,
+    leader: rollup.v1?.leader,
+    stability: rollup.v2?.stability,
+  };
 }
 
 export const getDashboard = query({
-  args: {
-    dateRange: v.optional(analyticsDateRangeValue),
-    minSampleSize: v.optional(v.number()),
-    quality: v.optional(
-      v.union(
-        v.literal("all"),
-        v.literal("good"),
-        v.literal("partial"),
-        v.literal("gap"),
-      ),
-    ),
-  },
-  handler: async (ctx, args) => {
-    const nowTs = Date.now();
-    const dateRange = args.dateRange ?? "7d";
-    const summaries = await listCandidateSummaries(ctx, dateRange, nowTs);
-    const markets = await listMarketsForSummaries(ctx, summaries);
-    const defaultMinSampleSize = ANALYTICS_MIN_SAMPLE_OPTIONS.includes(3) ? 3 : 1;
-
-    return buildAnalyticsReport({
-      filters: {
-        dateRange,
-        minSampleSize: Math.max(1, args.minSampleSize ?? defaultMinSampleSize),
-        quality: args.quality ?? "all",
-      },
-      markets,
-      nowTs,
-      summaries,
-    });
+  args: {},
+  handler: async (ctx) => {
+    return fromRollup(await getRollup(ctx));
   },
 });
 
-export const getPageData = query({
+export const getDatasetHealth = query({
+  args: {},
+  handler: async (ctx) => {
+    return fromRollup(await getRollup(ctx)).health;
+  },
+});
+
+export const listExcludedMarkets = query({
   args: {
-    checkpoint: cohortCheckpointValue,
-    dateRange: v.optional(analyticsDateRangeValue),
-    distanceBucket: cohortDistanceBucketValue,
-    minSampleSize: v.optional(v.number()),
-    quality: v.optional(
-      v.union(
-        v.literal("all"),
-        v.literal("good"),
-        v.literal("partial"),
-        v.literal("gap"),
-      ),
-    ),
-    side: cohortSideValue,
+    beforeWindowStartTs: v.optional(v.number()),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const nowTs = Date.now();
-    const dateRange = args.dateRange ?? "7d";
-    const quality = args.quality ?? "all";
-    const summaries = await listCandidateSummaries(ctx, dateRange, nowTs);
-    const markets = await listMarketsForSummaries(ctx, summaries);
-    const defaultMinSampleSize = ANALYTICS_MIN_SAMPLE_OPTIONS.includes(3) ? 3 : 1;
-    const minSampleSize = Math.max(1, args.minSampleSize ?? defaultMinSampleSize);
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
+    const scanLimit = limit * 4;
+    const page = [];
+    let cursor = args.beforeWindowStartTs ?? null;
+    let done = false;
+    let cursorRow = null;
+
+    for (let scanPage = 0; scanPage < 10 && page.length < limit; scanPage += 1) {
+      const baseQuery = ctx.db.query("market_analytics");
+      const indexedQuery =
+        cursor == null
+          ? baseQuery.withIndex("by_windowStartTs")
+          : baseQuery.withIndex("by_windowStartTs", (q) =>
+              q.lt("windowStartTs", cursor),
+            );
+      const rows = await indexedQuery.order("desc").take(scanLimit);
+
+      if (rows.length === 0) {
+        done = true;
+        break;
+      }
+
+      for (const row of rows) {
+        if (
+          Number.isFinite(row.windowStartTs) &&
+          row.excludedReasons.length > 0
+        ) {
+          page.push(row);
+
+          if (page.length >= limit) {
+            break;
+          }
+        }
+      }
+
+      cursorRow = rows[rows.length - 1];
+      cursor = Number.isFinite(cursorRow?.windowStartTs)
+        ? cursorRow.windowStartTs
+        : null;
+
+      if (rows.length < scanLimit || cursor === null) {
+        done = true;
+        break;
+      }
+    }
+
+    const nextBeforeWindowStartTs = Number.isFinite(cursorRow?.windowStartTs)
+      ? cursorRow.windowStartTs
+      : null;
 
     return {
-      cohortDrilldown: buildCohortDrilldownReport({
-        filters: {
-          dateRange,
-          quality,
-        },
-        markets,
-        nowTs,
-        selection: {
-          checkpoint: args.checkpoint,
-          distanceBucket: args.distanceBucket,
-          side: args.side,
-        },
-        summaries,
-      }),
-      dashboard: buildAnalyticsReport({
-        filters: {
-          dateRange,
-          minSampleSize,
-          quality,
-        },
-        markets,
-        nowTs,
-        summaries,
-      }),
+      done,
+      nextBeforeWindowStartTs: done ? null : nextBeforeWindowStartTs,
+      rows: page.map((row) => ({
+        _id: row._id,
+        excludedReasons: row.excludedReasons,
+        marketSlug: row.marketSlug,
+        summaryDataQuality: row.summaryDataQuality,
+        windowStartTs: row.windowStartTs,
+      })),
     };
   },
 });
 
-export const getCohortDrilldown = query({
-  args: {
-    checkpoint: cohortCheckpointValue,
-    dateRange: v.optional(analyticsDateRangeValue),
-    distanceBucket: cohortDistanceBucketValue,
-    quality: v.optional(
-      v.union(
-        v.literal("all"),
-        v.literal("good"),
-        v.literal("partial"),
-        v.literal("gap"),
-      ),
-    ),
-    side: cohortSideValue,
-  },
-  handler: async (ctx, args) => {
-    const nowTs = Date.now();
-    const dateRange = args.dateRange ?? "7d";
-    const summaries = await listCandidateSummaries(ctx, dateRange, nowTs);
-    const markets = await listMarketsForSummaries(ctx, summaries);
-
-    return buildCohortDrilldownReport({
-      filters: {
-        dateRange,
-        quality: args.quality ?? "all",
-      },
-      markets,
-      nowTs,
-      selection: {
-        checkpoint: args.checkpoint,
-        distanceBucket: args.distanceBucket,
-        side: args.side,
-      },
-      summaries,
-    });
+export const getLeaderAndDistance = query({
+  args: {},
+  handler: async (ctx) => {
+    return fromRollup(await getRollup(ctx)).leader;
   },
 });

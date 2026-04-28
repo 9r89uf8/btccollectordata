@@ -2,6 +2,7 @@ import { internal } from "./_generated/api";
 import { cronJobs } from "convex/server";
 
 const crons = cronJobs();
+const ANALYTICS_MATERIALIZER_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
 crons.interval(
   "discover active polymarket btc 5m markets",
@@ -15,6 +16,27 @@ crons.interval(
   { minutes: 15 },
   internal.internal.finalize.reconcileRecentClosedMarkets,
   { closedLimit: 200, finalizeLimit: 25 },
+);
+
+crons.interval(
+  "materialize btc 5m analytics",
+  { minutes: 10 },
+  internal.internal.marketAnalytics.materializeMissingOrStale,
+  { limit: 50, lookbackMs: ANALYTICS_MATERIALIZER_LOOKBACK_MS },
+);
+
+crons.interval(
+  "materialize btc 5m stability analytics",
+  { minutes: 10 },
+  internal.internal.marketStabilityAnalytics.materializeMissingOrStale,
+  { limit: 50, lookbackMs: ANALYTICS_MATERIALIZER_LOOKBACK_MS },
+);
+
+crons.interval(
+  "refresh btc 5m analytics dashboard rollup",
+  { minutes: 60 },
+  internal.internal.analyticsRollups.refreshNow,
+  {},
 );
 
 crons.interval(

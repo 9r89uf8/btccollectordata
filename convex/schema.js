@@ -4,6 +4,23 @@ import { v } from "convex/values";
 const nullable = (value) => v.union(value, v.null());
 const optionalNullable = (value) => v.optional(v.union(value, v.null()));
 const outcomeValue = v.union(v.literal("up"), v.literal("down"));
+const decisionActionValue = v.union(
+  v.literal("WAIT"),
+  v.literal("SCOUT_SMALL"),
+  v.literal("ENTER_UP"),
+  v.literal("ENTER_DOWN"),
+  v.literal("ADD_SMALL"),
+  v.literal("EXIT_OR_DE_RISK"),
+);
+const decisionSideValue = v.union(
+  v.literal("up"),
+  v.literal("down"),
+  v.literal("none"),
+);
+const actionPreMuteValue = v.union(
+  v.literal("ENTER_UP"),
+  v.literal("ENTER_DOWN"),
+);
 const captureModeValue = v.union(
   v.literal("poll"),
   v.literal("ws"),
@@ -22,6 +39,59 @@ const snapshotQualityValue = v.union(
   v.literal("stale_btc"),
   v.literal("gap"),
 );
+const analyticsSourceValue = v.union(
+  v.literal("official"),
+  v.literal("derived"),
+);
+const momentumSideValue = v.union(
+  v.literal("up"),
+  v.literal("down"),
+  v.literal("flat"),
+);
+const excludedReasonValue = v.union(
+  v.literal("missing-outcome"),
+  v.literal("derived-only-outcome"),
+  v.literal("missing-price-to-beat"),
+  v.literal("missing-checkpoint-btc"),
+  v.literal("stale-btc"),
+);
+const stabilityExcludedReasonValue = v.union(
+  v.literal("sparse-post-checkpoint-snapshots"),
+);
+const pathTypeValue = v.union(
+  v.literal("early-lock"),
+  v.literal("mid-lock"),
+  v.literal("late-lock"),
+  v.literal("final-second-flip"),
+  v.literal("chop"),
+  v.literal("near-line-unresolved"),
+  v.literal("unknown"),
+);
+const decisionCandidateRejectionValue = v.union(
+  v.literal("sparse"),
+  v.literal("missing"),
+  v.literal("not_applicable"),
+);
+const decisionSupportTierValue = v.union(
+  v.literal("usable"),
+  v.literal("warning-only"),
+  v.literal("ignored"),
+);
+const decisionProbabilityCandidateValue = v.object({
+  accepted: v.boolean(),
+  n: nullable(v.number()),
+  p: nullable(v.number()),
+  rejectionReason: optionalNullable(decisionCandidateRejectionValue),
+  shrunk: nullable(v.number()),
+  source: v.union(
+    v.literal("base"),
+    v.literal("chop"),
+    v.literal("momentum"),
+    v.literal("leaderAge"),
+    v.literal("prePathShape"),
+  ),
+  supportTier: optionalNullable(decisionSupportTierValue),
+});
 
 export default defineSchema({
   markets: defineTable({
@@ -164,26 +234,12 @@ export default defineSchema({
     btcBinanceAtStart: nullable(v.number()),
     btcBinanceAtEnd: nullable(v.number()),
     upDisplayedAtT0: nullable(v.number()),
-    downDisplayedAtT0: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT0: optionalNullable(v.number()),
     upDisplayedAtT15: nullable(v.number()),
-    downDisplayedAtT15: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT15: optionalNullable(v.number()),
     upDisplayedAtT30: nullable(v.number()),
-    downDisplayedAtT30: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT30: optionalNullable(v.number()),
     upDisplayedAtT60: nullable(v.number()),
-    downDisplayedAtT60: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT60: optionalNullable(v.number()),
     upDisplayedAtT120: nullable(v.number()),
-    downDisplayedAtT120: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT120: optionalNullable(v.number()),
     upDisplayedAtT240: nullable(v.number()),
-    downDisplayedAtT240: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT240: optionalNullable(v.number()),
     upDisplayedAtT295: nullable(v.number()),
-    downDisplayedAtT295: optionalNullable(v.number()),
-    btcDeltaFromAnchorAtT295: optionalNullable(v.number()),
     upMax: nullable(v.number()),
     upMin: nullable(v.number()),
     upRange: nullable(v.number()),
@@ -192,41 +248,224 @@ export default defineSchema({
     firstTimeAbove60: nullable(v.number()),
     firstTimeAbove70: nullable(v.number()),
     firstTimeAbove80: nullable(v.number()),
-    firstBtcSecureSecond: optionalNullable(v.number()),
-    firstBtcWinningSideSecond: optionalNullable(v.number()),
-    firstBtcWinningSideAt10UsdSecond: optionalNullable(v.number()),
-    firstBtcWinningSideAt20UsdSecond: optionalNullable(v.number()),
-    firstBtcWinningSideAt30UsdSecond: optionalNullable(v.number()),
-    btcPathLengthTo60Usd: optionalNullable(v.number()),
-    btcPathLengthTo120Usd: optionalNullable(v.number()),
-    btcRangeTo60Usd: optionalNullable(v.number()),
-    btcRangeTo120Usd: optionalNullable(v.number()),
-    anchorCrossCountTo60: optionalNullable(v.number()),
-    anchorCrossCountTo120: optionalNullable(v.number()),
-    timeAboveAnchorShareTo60: optionalNullable(v.number()),
-    timeAboveAnchorShareTo120: optionalNullable(v.number()),
-    validBtcBucketCountTo60: optionalNullable(v.number()),
-    validBtcBucketCountTo120: optionalNullable(v.number()),
-    momentumInto60Usd30s: optionalNullable(v.number()),
-    momentumInto120Usd30s: optionalNullable(v.number()),
-    maxAdverseExcursionFrom60Usd: optionalNullable(v.number()),
-    maxAdverseExcursionFrom120Usd: optionalNullable(v.number()),
-    residualRangeFrom60Usd: optionalNullable(v.number()),
-    residualRangeFrom120Usd: optionalNullable(v.number()),
-    residualPathLengthFrom60Usd: optionalNullable(v.number()),
-    residualPathLengthFrom120Usd: optionalNullable(v.number()),
-    anchorCrossCountAfter60: optionalNullable(v.number()),
-    anchorCrossCountAfter120: optionalNullable(v.number()),
-    timeOnWinningSideShareAfter60: optionalNullable(v.number()),
-    timeOnWinningSideShareAfter120: optionalNullable(v.number()),
-    validBtcBucketCountAfter60: optionalNullable(v.number()),
-    validBtcBucketCountAfter120: optionalNullable(v.number()),
     qualityFlags: v.array(v.string()),
     finalizedAt: v.number(),
   })
     .index("by_marketSlug", ["marketSlug"])
     .index("by_windowStartTs", ["windowStartTs"])
     .index("by_resolvedOutcome", ["resolvedOutcome"]),
+
+  market_analytics: defineTable({
+    marketSlug: v.string(),
+    marketId: v.string(),
+    windowStartTs: nullable(v.number()),
+    windowEndTs: nullable(v.number()),
+    analyticsVersion: v.number(),
+    resolvedOutcome: nullable(outcomeValue),
+    outcomeSource: nullable(analyticsSourceValue),
+    priceToBeat: nullable(v.number()),
+    priceToBeatSource: nullable(analyticsSourceValue),
+    summaryPresent: v.optional(v.boolean()),
+    summaryDataQuality: marketQualityValue,
+    excludedReasons: v.array(excludedReasonValue),
+    checkpoints: v.array(
+      v.object({
+        checkpointSecond: v.number(),
+        checkpointTs: v.number(),
+        btcAtCheckpoint: nullable(v.number()),
+        btcTickTs: nullable(v.number()),
+        btcTickReceivedAt: nullable(v.number()),
+        btcTickAgeMs: nullable(v.number()),
+        distanceToBeatBps: nullable(v.number()),
+        currentLeader: nullable(outcomeValue),
+        didCurrentLeaderWin: nullable(v.boolean()),
+      }),
+    ),
+    completeFreshCheckpoints: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_marketSlug", ["marketSlug"])
+    .index("by_windowStartTs", ["windowStartTs"])
+    .index("by_windowEndTs", ["windowEndTs"])
+    .index("by_analyticsVersion", ["analyticsVersion"]),
+
+  market_stability_analytics: defineTable({
+    marketSlug: v.string(),
+    marketId: v.string(),
+    windowStartTs: nullable(v.number()),
+    windowEndTs: nullable(v.number()),
+    analyticsVersion: nullable(v.number()),
+    stabilityAnalyticsVersion: v.number(),
+    resolvedOutcome: nullable(outcomeValue),
+    priceToBeat: nullable(v.number()),
+    excludedReasons: v.array(stabilityExcludedReasonValue),
+    pathSummary: v.object({
+      closeMarginBps: nullable(v.number()),
+      hardFlipCount: v.number(),
+      lastSnapshotAgeMsAtClose: optionalNullable(v.number()),
+      maxDistanceBps: nullable(v.number()),
+      maxSnapshotGapMs: nullable(v.number()),
+      noiseTouchCount: v.number(),
+      pathGood: v.boolean(),
+      pathType: pathTypeValue,
+      postCheckpointSnapshotCoveragePct: v.number(),
+      snapshotCadenceMs: nullable(v.number()),
+      snapshotCoveragePct: v.number(),
+      winnerLockAgeAtClose: nullable(v.number()),
+      winnerLockSecond: nullable(v.number()),
+    }),
+    checkpoints: v.array(
+      v.object({
+        checkpointInNoise: v.boolean(),
+        checkpointSecond: v.number(),
+        checkpointTs: nullable(v.number()),
+        distanceBps: nullable(v.number()),
+        flipLoss: v.boolean(),
+        leader: nullable(outcomeValue),
+        leaderWonAtClose: nullable(v.boolean()),
+        noisyLeaderWin: v.boolean(),
+        postAnyHardFlip: nullable(v.boolean()),
+        postFirstHardFlipSecond: nullable(v.number()),
+        postHardFlipCount: nullable(v.number()),
+        postLastHardFlipSecond: nullable(v.number()),
+        postLastSnapshotAgeMsAtClose: optionalNullable(v.number()),
+        postMaxAdverseBps: nullable(v.number()),
+        postMaxSnapshotGapMs: nullable(v.number()),
+        postMinSignedMarginBps: nullable(v.number()),
+        postPathGood: v.boolean(),
+        postSnapshotCoveragePct: v.number(),
+        postTimeUnderwaterSeconds: nullable(v.number()),
+        postTouchedNoise: nullable(v.boolean()),
+        leaderAlignedMomentum30sBps: optionalNullable(v.number()),
+        leaderAlignedMomentum60sBps: optionalNullable(v.number()),
+        momentum30sAgreesWithLeader: optionalNullable(v.boolean()),
+        momentum30sBps: optionalNullable(v.number()),
+        momentum30sSide: optionalNullable(momentumSideValue),
+        momentum60sAgreesWithLeader: optionalNullable(v.boolean()),
+        momentum60sBps: optionalNullable(v.number()),
+        momentum60sSide: optionalNullable(momentumSideValue),
+        preCurrentLeadAgeSeconds: nullable(v.number()),
+        preCrossCountLast60s: optionalNullable(v.number()),
+        preDirectionChangeCount: optionalNullable(v.number()),
+        preFlipCount: nullable(v.number()),
+        preLastFlipAgeSeconds: nullable(v.number()),
+        preLeaderDwellPct: nullable(v.number()),
+        preLongestLeadStreakSeconds: nullable(v.number()),
+        preMaxSnapshotGapMs: optionalNullable(v.number()),
+        preNearLineSeconds: optionalNullable(v.number()),
+        prePathGood: optionalNullable(v.boolean()),
+        preRange60sBps: optionalNullable(v.number()),
+        preRange120sBps: optionalNullable(v.number()),
+        preRealizedVolatility60s: nullable(v.number()),
+        preRealizedVolatility120s: nullable(v.number()),
+        preSnapshotCoveragePct: optionalNullable(v.number()),
+        recoveredLeaderWin: v.boolean(),
+        stableLeaderWin: v.boolean(),
+        unknownPath: v.boolean(),
+      }),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_marketSlug", ["marketSlug"])
+    .index("by_windowStartTs", ["windowStartTs"])
+    .index("by_windowEndTs", ["windowEndTs"])
+    .index("by_stabilityAnalyticsVersion", ["stabilityAnalyticsVersion"]),
+
+  analytics_dashboard_rollups: defineTable({
+    key: v.string(),
+    analyticsVersion: nullable(v.number()),
+    computedAt: v.number(),
+    rollupVersion: v.number(),
+    stabilityAnalyticsVersion: nullable(v.number()),
+    v1: v.any(),
+    v2: v.any(),
+  })
+    .index("by_key", ["key"])
+    .index("by_computedAt", ["computedAt"]),
+
+  decision_signals: defineTable({
+    marketSlug: v.string(),
+    marketId: optionalNullable(v.string()),
+    windowStartTs: optionalNullable(v.number()),
+    windowEndTs: optionalNullable(v.number()),
+    evaluatedAt: v.number(),
+    secondBucket: v.number(),
+    checkpointSecond: v.number(),
+    secondsFromWindowStart: optionalNullable(v.number()),
+    decisionVersion: v.string(),
+    // Phase 7 must populate engineRunId for every runner-emitted row.
+    engineRunId: optionalNullable(v.string()),
+
+    action: decisionActionValue,
+    actionPreMute: optionalNullable(actionPreMuteValue),
+    reasonCodes: v.array(v.string()),
+
+    priceToBeat: optionalNullable(v.number()),
+    priceToBeatSource: optionalNullable(v.string()),
+    btcPrice: optionalNullable(v.number()),
+    btcTickTs: optionalNullable(v.number()),
+    btcReceivedAt: optionalNullable(v.number()),
+    btcAgeMs: optionalNullable(v.number()),
+
+    signedDistanceBps: optionalNullable(v.number()),
+    absDistanceBps: optionalNullable(v.number()),
+    distanceBucket: optionalNullable(v.string()),
+    leader: optionalNullable(decisionSideValue),
+
+    pBase: optionalNullable(v.number()),
+    pEst: optionalNullable(v.number()),
+    pCandidates: v.optional(v.array(decisionProbabilityCandidateValue)),
+    priorsComputedAt: optionalNullable(v.number()),
+    priorsRollupVersion: optionalNullable(v.number()),
+
+    leaderBid: optionalNullable(v.number()),
+    leaderAsk: optionalNullable(v.number()),
+    leaderSpread: optionalNullable(v.number()),
+    leaderTopAskDepth: optionalNullable(v.number()),
+    edge: optionalNullable(v.number()),
+    requiredEdge: optionalNullable(v.number()),
+    requiredDistanceBps: optionalNullable(v.number()),
+
+    flags: v.optional(v.any()),
+    features: v.optional(v.any()),
+
+    intendedSize: optionalNullable(v.number()),
+    limitPrice: optionalNullable(v.number()),
+
+    snapshotTs: optionalNullable(v.number()),
+    snapshotAgeMs: optionalNullable(v.number()),
+    sourceQuality: optionalNullable(v.string()),
+    captureMode: optionalNullable(captureModeValue),
+    collectorStatus: optionalNullable(v.string()),
+
+    createdAt: v.number(),
+  })
+    .index("by_marketSlug_evaluatedAt", ["marketSlug", "evaluatedAt"])
+    .index("by_evaluatedAt", ["evaluatedAt"])
+    .index("by_action_evaluatedAt", ["action", "evaluatedAt"])
+    .index("by_marketSlug_checkpointSecond", [
+      "marketSlug",
+      "checkpointSecond",
+    ])
+    .index("by_decisionVersion_evaluatedAt", [
+      "decisionVersion",
+      "evaluatedAt",
+    ])
+    .index("by_dedupe_key", [
+      "marketSlug",
+      "decisionVersion",
+      "checkpointSecond",
+      "secondBucket",
+    ]),
+
+  runtime_flags: defineTable({
+    key: v.string(),
+    value: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   collector_health: defineTable({
     collectorName: v.string(),
@@ -261,6 +500,9 @@ export default defineSchema({
     pollOverrunCount24h: optionalNullable(v.number()),
     pollFailureCount24h: optionalNullable(v.number()),
     partialPollCount24h: optionalNullable(v.number()),
+    lastDecisionAt: optionalNullable(v.number()),
+    lastDecisionAction: optionalNullable(decisionActionValue),
+    decisionsEmittedLastBatch: optionalNullable(v.number()),
     lastError: nullable(v.string()),
     updatedAt: v.number(),
   })

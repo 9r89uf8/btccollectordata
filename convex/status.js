@@ -34,20 +34,19 @@ export const getProjectShell = query({
     ).length;
     const discoveryComplete = Boolean(latestMarket);
     const summariesLive = Boolean(latestSummary);
-    const analyticsReady = summariesLive;
     const shadowReady = wsBackedActiveMarkets > 0;
 
     return {
       projectName: "Polymarket BTC Up/Down 5-minute tracker",
-      phase: analyticsReady
-        ? "analytics"
+      phase: summariesLive
+        ? "summaries"
         : shadowReady
           ? "ws-rollout"
           : discoveryComplete
             ? "dashboard"
             : "foundation",
-      summary: analyticsReady
-        ? "Gamma discovery, polling snapshots, stored summaries, and analytics are live. Fast-moving collector health and latest BTC now load through their own narrow queries instead of the broad project shell."
+      summary: summariesLive
+        ? "Gamma discovery, polling snapshots, and stored summaries are live. Fast-moving collector health and latest BTC now load through their own narrow queries instead of the broad project shell."
         : shadowReady
           ? "Gamma discovery is live, active market capture includes WebSocket-backed rows, and the dashboard is ready while summary coverage catches up."
           : discoveryComplete
@@ -57,8 +56,8 @@ export const getProjectShell = query({
         {
           name: "web",
           state: "ready",
-          note: analyticsReady
-            ? "Homepage acts as the live market dashboard, `/markets/[slug]` shows replay, and `/analytics` exposes stored-summary research views."
+          note: summariesLive
+            ? "Homepage acts as the live market dashboard, and `/markets/[slug]` shows replay plus stored market summaries."
             : discoveryComplete
               ? "Homepage acts as the live market dashboard, and `/markets/[slug]` surfaces latest and recent market state."
               : "App Router shell is live in plain JavaScript with a narrow Convex client boundary.",
@@ -66,7 +65,7 @@ export const getProjectShell = query({
         {
           name: "convex",
           state: "ready",
-          note: analyticsReady
+          note: summariesLive
             ? `Deployment is serving stored summaries plus ${pollBackedActiveMarkets} poll-backed active market(s) and ${wsBackedActiveMarkets} WS-backed active market(s).`
             : discoveryComplete
               ? `Deployment is serving catalog rows and ${activeMarkets.length} active market(s).`
@@ -130,11 +129,6 @@ export const getProjectShell = query({
           id: "summary-finalizer",
           label: "Finalize closed markets into market_summaries and patch data quality",
           done: summariesLive,
-        },
-        {
-          id: "analytics",
-          label: "Build analytics over stored market_summaries",
-          done: analyticsReady,
         },
         {
           id: "websocket-rollout",

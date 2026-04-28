@@ -33,14 +33,14 @@ export default function SiteHeader({ current = "/" }) {
           <NavLink href="/" current={current}>
             Dashboard
           </NavLink>
-          <NavLink href="/signals" current={current}>
-            Signals
-          </NavLink>
           <NavLink href="/markets" current={current}>
             Markets
           </NavLink>
           <NavLink href="/analytics" current={current}>
             Analytics
+          </NavLink>
+          <NavLink href="/decisions" current={current}>
+            Decisions
           </NavLink>
         </div>
       </div>
@@ -54,6 +54,9 @@ export default function SiteHeader({ current = "/" }) {
         </span>
         <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
           Step 10 WS rollout
+        </span>
+        <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+          BTC analytics v1
         </span>
       </div>
     </header>

@@ -45,6 +45,19 @@ export const upsertCollectorHealth = internalMutation({
     pollOverrunCount24h: v.optional(v.union(v.number(), v.null())),
     pollFailureCount24h: v.optional(v.union(v.number(), v.null())),
     partialPollCount24h: v.optional(v.union(v.number(), v.null())),
+    lastDecisionAt: v.optional(v.union(v.number(), v.null())),
+    lastDecisionAction: v.optional(
+      v.union(
+        v.literal("WAIT"),
+        v.literal("SCOUT_SMALL"),
+        v.literal("ENTER_UP"),
+        v.literal("ENTER_DOWN"),
+        v.literal("ADD_SMALL"),
+        v.literal("EXIT_OR_DE_RISK"),
+        v.null(),
+      ),
+    ),
+    decisionsEmittedLastBatch: v.optional(v.union(v.number(), v.null())),
     lastError: v.union(v.string(), v.null()),
   },
   handler: async (ctx, args) => {

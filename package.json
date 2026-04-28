@@ -10,7 +10,8 @@
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
     "collector:dev": "node collector/src/index.js",
-    "test": "node --test packages/shared/src/market.test.js packages/shared/src/snapshot.test.js packages/shared/src/summary.test.js packages/shared/src/analytics.test.js packages/shared/src/repair.test.js packages/shared/src/liveSignals.test.js collector/src/clob.test.js collector/src/snapshotter.test.js collector/src/state.test.js collector/src/marketWs.test.js components/marketReplay.test.mjs",
+    "decision:replay": "node scripts/decisionReplay.js",
+    "test": "node --test packages/shared/src/market.test.js packages/shared/src/snapshot.test.js packages/shared/src/summary.test.js packages/shared/src/repair.test.js packages/shared/src/marketAnalytics.test.js packages/shared/src/marketStabilityAnalytics.test.js packages/shared/src/analyticsDashboard.test.js packages/shared/src/decisionBuckets.test.js packages/shared/src/decisionConfig.test.js packages/shared/src/decisionFeatures.test.js packages/shared/src/decisionPriors.test.js packages/shared/src/decisionEngine.test.js packages/shared/src/decisionSignals.test.js convex/decisionSignals.contract.test.mjs collector/src/clob.test.js collector/src/config.test.js collector/src/convexClient.test.js collector/src/snapshotter.test.js collector/src/state.test.js collector/src/marketWs.test.js collector/src/decisionPathBuffer.test.js collector/src/decisionRunner.test.js collector/src/decisionShadowRunner.test.js scripts/decisionReplay.test.mjs components/marketReplay.test.mjs components/AnalyticsDashboard.source.test.mjs",
     "build": "next build",
     "start": "next start"
   },
