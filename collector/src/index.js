@@ -1,12 +1,5 @@
 import process from "node:process";
-import { randomUUID } from "node:crypto";
 
-import { DECISION_CONFIG } from "../../packages/shared/src/decisionConfig.js";
-import {
-  DECISION_RUNTIME_FLAG_DEFAULTS,
-  decisionSignalDedupeKey,
-  normalizeDecisionRuntimeFlags,
-} from "../../packages/shared/src/decisionSignals.js";
 import {
   BTC_SOURCES,
   COLLECTOR_STATUS,
@@ -16,8 +9,6 @@ import { CAPTURE_MODES } from "../../packages/shared/src/market.js";
 import { fetchClobMarketData } from "./clob.js";
 import { loadCollectorConfig } from "./config.js";
 import { createIngestClient, createQueryClient } from "./convexClient.js";
-import { createDecisionPathBufferStore } from "./decisionPathBuffer.js";
-import { createDecisionShadowRunner } from "./decisionShadowRunner.js";
 import { startMarketWsClient } from "./marketWs.js";
 import { startRtdsClient } from "./rtds.js";
 import { buildMarketSnapshots, compareSnapshotParity } from "./snapshotter.js";
@@ -28,7 +19,6 @@ import {
 } from "./state.js";
 
 const MAX_RAW_EVENTS_PER_BATCH = Math.min(INGEST_MAX_BATCH_ITEMS, 100);
-const DECISION_QUERY_TIMEOUT_MS = 2500;
 
 if (typeof WebSocket !== "function") {
   throw new Error(
@@ -118,50 +108,14 @@ function takeSortedEntries(map, limit, tieBreaker) {
   return sortByTimestamp(map.values(), tieBreaker).slice(0, limit);
 }
 
-function withTimeout(promise, timeoutMs, label) {
-  let timeoutId;
-
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timeoutId);
-  });
-}
-
-function buildDecisionConfig(config) {
-  if (
-    config.decisionRequireOfficialPriceToBeat ===
-    DECISION_CONFIG.requireOfficialPriceToBeat
-  ) {
-    return DECISION_CONFIG;
-  }
-
-  return {
-    ...DECISION_CONFIG,
-    requireOfficialPriceToBeat: config.decisionRequireOfficialPriceToBeat,
-  };
-}
-
 async function main() {
   const config = loadCollectorConfig();
   const ingestClient = createIngestClient(config);
   const queryClient = createQueryClient(config);
-  const decisionConfig = buildDecisionConfig(config);
-  const decisionEngineRunId = randomUUID();
   const marketStateStore = createMarketStateStore();
-  const decisionPathBuffers = createDecisionPathBufferStore();
-  const decisionShadowRunner = createDecisionShadowRunner({
-    config: decisionConfig,
-    engineRunId: decisionEngineRunId,
-  });
   const pendingTicks = new Map();
   const pendingSnapshots = new Map();
   const pendingRawEvents = new Map();
-  const pendingDecisionSignals = new Map();
   const latestSnapshotsByMarketSlug = new Map();
 
   const state = {
@@ -178,8 +132,6 @@ async function main() {
     lastWsSnapshotAt: null,
     latestBinanceTick: null,
     latestChainlinkTick: null,
-    latestDecisionPriors: null,
-    latestDecisionRuntimeFlags: { ...DECISION_RUNTIME_FLAG_DEFAULTS },
     marketInfoByAssetId: new Map(),
     marketRefreshInFlight: false,
     marketWsConnected: false,
@@ -198,11 +150,6 @@ async function main() {
     lastPollEndpointErrors: [],
     lastPollStartedAt: null,
     lastPollStatus: null,
-    lastDecisionAction: null,
-    lastDecisionAt: null,
-    decisionShadowInFlight: false,
-    lastDecisionPriorsRefreshAt: null,
-    lastDecisionRuntimeFlagsRefreshAt: null,
   };
 
   const intervals = [];
@@ -299,139 +246,8 @@ async function main() {
       latestSnapshotsByMarketSlug.set(snapshot.marketSlug, snapshot);
     }
 
-    decisionPathBuffers.pushSnapshots(snapshots);
     state.snapshotCaptureMode = captureMode;
     state.lastMarketEventAt = snapshots[snapshots.length - 1].ts;
-  }
-
-  function queueDecisionSignals(signals) {
-    if (!Array.isArray(signals) || signals.length === 0) {
-      return;
-    }
-
-    for (const signal of signals) {
-      pendingDecisionSignals.set(decisionSignalDedupeKey(signal), signal);
-    }
-
-    const latestSignal = signals.reduce((latest, signal) => {
-      if (!latest || signal.evaluatedAt > latest.evaluatedAt) {
-        return signal;
-      }
-
-      return latest;
-    }, null);
-
-    state.lastDecisionAt = latestSignal?.evaluatedAt ?? state.lastDecisionAt;
-    state.lastDecisionAction = latestSignal?.action ?? state.lastDecisionAction;
-  }
-
-  async function refreshDecisionRuntimeFlags(nowTs, { force = false } = {}) {
-    if (!config.enableDecisionEngine) {
-      return state.latestDecisionRuntimeFlags;
-    }
-
-    const due =
-      force ||
-      state.lastDecisionRuntimeFlagsRefreshAt === null ||
-      nowTs - state.lastDecisionRuntimeFlagsRefreshAt >=
-        config.decisionRuntimeFlagsRefreshMs;
-
-    if (!due) {
-      return state.latestDecisionRuntimeFlags;
-    }
-
-    try {
-      state.latestDecisionRuntimeFlags = normalizeDecisionRuntimeFlags(
-        await withTimeout(
-          queryClient.getDecisionRuntimeFlags(),
-          DECISION_QUERY_TIMEOUT_MS,
-          "decision runtime flag refresh",
-        ),
-      );
-      state.lastDecisionRuntimeFlagsRefreshAt = nowTs;
-    } catch (error) {
-      state.lastError = formatError(error);
-      console.warn("[collector] decision runtime flag refresh failed", {
-        error: state.lastError,
-      });
-    }
-
-    return state.latestDecisionRuntimeFlags;
-  }
-
-  async function refreshDecisionPriors(nowTs, { force = false } = {}) {
-    if (!config.enableDecisionEngine) {
-      return state.latestDecisionPriors;
-    }
-
-    const due =
-      force ||
-      state.lastDecisionPriorsRefreshAt === null ||
-      nowTs - state.lastDecisionPriorsRefreshAt >=
-        config.decisionPriorsRefreshMs;
-
-    if (!due) {
-      return state.latestDecisionPriors;
-    }
-
-    try {
-      state.latestDecisionPriors = await withTimeout(
-        queryClient.getDecisionPriors(),
-        DECISION_QUERY_TIMEOUT_MS,
-        "decision priors refresh",
-      );
-      state.lastDecisionPriorsRefreshAt = nowTs;
-    } catch (error) {
-      state.lastError = formatError(error);
-      console.warn("[collector] decision priors refresh failed", {
-        error: state.lastError,
-      });
-    }
-
-    return state.latestDecisionPriors;
-  }
-
-  async function runDecisionShadow({ nowTs = Date.now() } = {}) {
-    if (
-      !config.enableDecisionEngine ||
-      state.shuttingDown ||
-      state.decisionShadowInFlight
-    ) {
-      return;
-    }
-
-    state.decisionShadowInFlight = true;
-
-    try {
-      const runtimeControls = await refreshDecisionRuntimeFlags(nowTs);
-      const priors =
-        runtimeControls.decision_engine_enabled === true
-          ? await refreshDecisionPriors(nowTs)
-          : state.latestDecisionPriors;
-      const signals = decisionShadowRunner.evaluate({
-        captureMode: state.snapshotCaptureMode,
-        collectorStatus: deriveCollectorStatus(),
-        config: decisionConfig,
-        enabled: config.enableDecisionEngine,
-        intendedSize: config.decisionBankroll,
-        latestChainlinkTick: state.latestChainlinkTick,
-        latestSnapshotsByMarketSlug,
-        markets: state.activeMarkets,
-        nowMs: nowTs,
-        pathBuffer: decisionPathBuffers,
-        priors,
-        runtimeControls,
-      });
-
-      queueDecisionSignals(signals);
-    } catch (error) {
-      state.lastError = formatError(error);
-      console.error("[collector] decision shadow evaluation failed", {
-        error: state.lastError,
-      });
-    } finally {
-      state.decisionShadowInFlight = false;
-    }
   }
 
   function queueGapSnapshots(nowTs, reason) {
@@ -510,12 +326,6 @@ async function main() {
       status: deriveCollectorStatus(),
     };
 
-    if (config.enableDecisionEngine) {
-      health.lastDecisionAt = state.lastDecisionAt;
-      health.lastDecisionAction = state.lastDecisionAction;
-      health.decisionsEmittedLastBatch = batchCounts.decisionSignals;
-    }
-
     return health;
   }
 
@@ -540,24 +350,12 @@ async function main() {
       INGEST_MAX_BATCH_ITEMS,
       (a, b) => a.marketSlug.localeCompare(b.marketSlug),
     );
-    const decisionSignals = [...pendingDecisionSignals.values()]
-      .sort((a, b) => {
-        if (a.evaluatedAt !== b.evaluatedAt) {
-          return a.evaluatedAt - b.evaluatedAt;
-        }
-
-        return decisionSignalDedupeKey(a).localeCompare(
-          decisionSignalDedupeKey(b),
-        );
-      })
-      .slice(0, INGEST_MAX_BATCH_ITEMS);
 
     if (
       !force &&
       rawEvents.length === 0 &&
       btcTicks.length === 0 &&
-      snapshots.length === 0 &&
-      decisionSignals.length === 0
+      snapshots.length === 0
     ) {
       return;
     }
@@ -565,7 +363,6 @@ async function main() {
     const sentAt = Date.now();
     const batchCounts = {
       btcTicks: btcTicks.length,
-      decisionSignals: decisionSignals.length,
       rawEvents: rawEvents.length,
       snapshots: snapshots.length,
     };
@@ -581,10 +378,6 @@ async function main() {
         health: buildHealth(sentAt, batchCounts),
       };
 
-      if (config.enableDecisionEngine) {
-        batch.decisionSignals = decisionSignals;
-      }
-
       await ingestClient.sendBatch(batch);
 
       for (const rawEvent of rawEvents) {
@@ -599,10 +392,6 @@ async function main() {
         pendingSnapshots.delete(dedupeKeyForSnapshot(snapshot));
       }
 
-      for (const signal of decisionSignals) {
-        pendingDecisionSignals.delete(decisionSignalDedupeKey(signal));
-      }
-
       state.lastBatchSentAt = sentAt;
       state.lastError = null;
     } catch (error) {
@@ -611,7 +400,6 @@ async function main() {
         error: state.lastError,
         rawEvents: rawEvents.length,
         btcTicks: btcTicks.length,
-        decisionSignals: decisionSignals.length,
         snapshots: snapshots.length,
       });
     } finally {
@@ -645,7 +433,6 @@ async function main() {
 
       state.activeMarkets = nextMarkets;
       state.marketInfoByAssetId = buildAssetInfoByTokenId(nextMarkets);
-      decisionPathBuffers.syncActiveMarkets(nextMarkets);
 
       if (removedAssetIds.length > 0) {
         marketStateStore.removeAssetIds(removedAssetIds);
@@ -689,7 +476,6 @@ async function main() {
       state.lastPollStatus = "overrun";
       state.lastPollEndpointErrors = ["previous poll was still in flight"];
       queueGapSnapshots(nowTs, "poll_overrun");
-      void runDecisionShadow({ nowTs });
       return;
     }
 
@@ -789,7 +575,6 @@ async function main() {
       } else if (pollError) {
         state.lastError = formatError(pollError);
       }
-      void runDecisionShadow({ nowTs });
       state.lastPollCompletedAt = Date.now();
       state.lastPollDurationMs = state.lastPollCompletedAt - pollStartedAt;
     } finally {
@@ -872,10 +657,6 @@ async function main() {
     clobBase: config.polymarketClobBase,
     collectorName: config.collectorName,
     enableMarketWs: config.enableMarketWs,
-    enableDecisionEngine: config.enableDecisionEngine,
-    decisionEngineRunId: config.enableDecisionEngine ? decisionEngineRunId : null,
-    decisionPriorsRefreshMs: config.decisionPriorsRefreshMs,
-    decisionRuntimeFlagsRefreshMs: config.decisionRuntimeFlagsRefreshMs,
     persistMarketRawEvents: config.persistMarketRawEvents,
     marketConnectTimeoutMs: config.marketConnectTimeoutMs,
     marketHeartbeatMs: config.marketHeartbeatMs,

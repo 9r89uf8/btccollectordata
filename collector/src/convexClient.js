@@ -56,12 +56,6 @@ export function createQueryClient(config) {
 
   return {
     client,
-    async getDecisionPriors() {
-      return await client.query("decisionPriors:getLatest", {});
-    },
-    async getDecisionRuntimeFlags() {
-      return await client.query("runtimeFlags:getDecisionRuntimeFlags", {});
-    },
     async listActiveMarkets() {
       return await client.query("markets:listActiveBtc5m", {});
     },

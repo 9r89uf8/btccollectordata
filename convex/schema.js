@@ -4,22 +4,13 @@ import { v } from "convex/values";
 const nullable = (value) => v.union(value, v.null());
 const optionalNullable = (value) => v.optional(v.union(value, v.null()));
 const outcomeValue = v.union(v.literal("up"), v.literal("down"));
-const decisionActionValue = v.union(
+const legacyDecisionActionValue = v.union(
   v.literal("WAIT"),
   v.literal("SCOUT_SMALL"),
   v.literal("ENTER_UP"),
   v.literal("ENTER_DOWN"),
   v.literal("ADD_SMALL"),
   v.literal("EXIT_OR_DE_RISK"),
-);
-const decisionSideValue = v.union(
-  v.literal("up"),
-  v.literal("down"),
-  v.literal("none"),
-);
-const actionPreMuteValue = v.union(
-  v.literal("ENTER_UP"),
-  v.literal("ENTER_DOWN"),
 );
 const captureModeValue = v.union(
   v.literal("poll"),
@@ -67,31 +58,6 @@ const pathTypeValue = v.union(
   v.literal("near-line-unresolved"),
   v.literal("unknown"),
 );
-const decisionCandidateRejectionValue = v.union(
-  v.literal("sparse"),
-  v.literal("missing"),
-  v.literal("not_applicable"),
-);
-const decisionSupportTierValue = v.union(
-  v.literal("usable"),
-  v.literal("warning-only"),
-  v.literal("ignored"),
-);
-const decisionProbabilityCandidateValue = v.object({
-  accepted: v.boolean(),
-  n: nullable(v.number()),
-  p: nullable(v.number()),
-  rejectionReason: optionalNullable(decisionCandidateRejectionValue),
-  shrunk: nullable(v.number()),
-  source: v.union(
-    v.literal("base"),
-    v.literal("chop"),
-    v.literal("momentum"),
-    v.literal("leaderAge"),
-    v.literal("prePathShape"),
-  ),
-  supportTier: optionalNullable(decisionSupportTierValue),
-});
 
 export default defineSchema({
   markets: defineTable({
@@ -385,88 +351,6 @@ export default defineSchema({
     .index("by_key", ["key"])
     .index("by_computedAt", ["computedAt"]),
 
-  decision_signals: defineTable({
-    marketSlug: v.string(),
-    marketId: optionalNullable(v.string()),
-    windowStartTs: optionalNullable(v.number()),
-    windowEndTs: optionalNullable(v.number()),
-    evaluatedAt: v.number(),
-    secondBucket: v.number(),
-    checkpointSecond: v.number(),
-    secondsFromWindowStart: optionalNullable(v.number()),
-    decisionVersion: v.string(),
-    // Phase 7 must populate engineRunId for every runner-emitted row.
-    engineRunId: optionalNullable(v.string()),
-
-    action: decisionActionValue,
-    actionPreMute: optionalNullable(actionPreMuteValue),
-    reasonCodes: v.array(v.string()),
-
-    priceToBeat: optionalNullable(v.number()),
-    priceToBeatSource: optionalNullable(v.string()),
-    btcPrice: optionalNullable(v.number()),
-    btcTickTs: optionalNullable(v.number()),
-    btcReceivedAt: optionalNullable(v.number()),
-    btcAgeMs: optionalNullable(v.number()),
-
-    signedDistanceBps: optionalNullable(v.number()),
-    absDistanceBps: optionalNullable(v.number()),
-    distanceBucket: optionalNullable(v.string()),
-    leader: optionalNullable(decisionSideValue),
-
-    pBase: optionalNullable(v.number()),
-    pEst: optionalNullable(v.number()),
-    pCandidates: v.optional(v.array(decisionProbabilityCandidateValue)),
-    priorsComputedAt: optionalNullable(v.number()),
-    priorsRollupVersion: optionalNullable(v.number()),
-
-    leaderBid: optionalNullable(v.number()),
-    leaderAsk: optionalNullable(v.number()),
-    leaderSpread: optionalNullable(v.number()),
-    leaderTopAskDepth: optionalNullable(v.number()),
-    edge: optionalNullable(v.number()),
-    requiredEdge: optionalNullable(v.number()),
-    requiredDistanceBps: optionalNullable(v.number()),
-
-    flags: v.optional(v.any()),
-    features: v.optional(v.any()),
-
-    intendedSize: optionalNullable(v.number()),
-    limitPrice: optionalNullable(v.number()),
-
-    snapshotTs: optionalNullable(v.number()),
-    snapshotAgeMs: optionalNullable(v.number()),
-    sourceQuality: optionalNullable(v.string()),
-    captureMode: optionalNullable(captureModeValue),
-    collectorStatus: optionalNullable(v.string()),
-
-    createdAt: v.number(),
-  })
-    .index("by_marketSlug_evaluatedAt", ["marketSlug", "evaluatedAt"])
-    .index("by_evaluatedAt", ["evaluatedAt"])
-    .index("by_action_evaluatedAt", ["action", "evaluatedAt"])
-    .index("by_marketSlug_checkpointSecond", [
-      "marketSlug",
-      "checkpointSecond",
-    ])
-    .index("by_decisionVersion_evaluatedAt", [
-      "decisionVersion",
-      "evaluatedAt",
-    ])
-    .index("by_dedupe_key", [
-      "marketSlug",
-      "decisionVersion",
-      "checkpointSecond",
-      "secondBucket",
-    ]),
-
-  runtime_flags: defineTable({
-    key: v.string(),
-    value: v.any(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  }).index("by_key", ["key"]),
-
   collector_health: defineTable({
     collectorName: v.string(),
     status: v.union(v.literal("ok"), v.literal("degraded"), v.literal("down")),
@@ -501,7 +385,7 @@ export default defineSchema({
     pollFailureCount24h: optionalNullable(v.number()),
     partialPollCount24h: optionalNullable(v.number()),
     lastDecisionAt: optionalNullable(v.number()),
-    lastDecisionAction: optionalNullable(decisionActionValue),
+    lastDecisionAction: optionalNullable(legacyDecisionActionValue),
     decisionsEmittedLastBatch: optionalNullable(v.number()),
     lastError: nullable(v.string()),
     updatedAt: v.number(),

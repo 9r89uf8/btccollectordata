@@ -7,7 +7,6 @@ import {
   INGEST_MAX_BATCH_ITEMS,
   INGEST_MAX_BYTES,
 } from "../packages/shared/src/ingest.js";
-import { DECISION_ACTION_VALUES } from "../packages/shared/src/decisionConfig.js";
 
 const http = httpRouter();
 
@@ -86,9 +85,6 @@ http.route({
     const rawEvents = Array.isArray(payload.rawEvents) ? payload.rawEvents : [];
     const snapshots = Array.isArray(payload.snapshots) ? payload.snapshots : [];
     const btcTicks = Array.isArray(payload.btcTicks) ? payload.btcTicks : [];
-    const decisionSignals = Array.isArray(payload.decisionSignals)
-      ? payload.decisionSignals
-      : [];
     const snapshotCaptureMode =
       typeof payload.snapshotCaptureMode === "string" &&
       ["poll", "ws", "backfill", "unknown"].includes(payload.snapshotCaptureMode)
@@ -100,7 +96,6 @@ http.route({
       rawEvents.length,
       snapshots.length,
       btcTicks.length,
-      decisionSignals.length,
     ];
 
     if (batchSizes.some((size) => size > INGEST_MAX_BATCH_ITEMS)) {
@@ -111,11 +106,6 @@ http.route({
       assertMonotonic(rawEvents, (event) => event.ts, "rawEvents");
       assertMonotonic(snapshots, (snapshot) => snapshot.ts, "snapshots");
       assertMonotonic(btcTicks, (tick) => tick.ts, "btcTicks");
-      assertMonotonic(
-        decisionSignals,
-        (signal) => signal.evaluatedAt,
-        "decisionSignals",
-      );
     } catch (error) {
       return badRequest(error.message);
     }
@@ -143,13 +133,6 @@ http.route({
       results.btcTicks = await ctx.runMutation(
         internal["internal/ingestion"].insertBtcTicks,
         { btcTicks },
-      );
-    }
-
-    if (decisionSignals.length > 0) {
-      results.decisionSignals = await ctx.runMutation(
-        internal["internal/decisionSignalIngestion"].insertDecisionSignals,
-        { decisionSignals },
       );
     }
 
@@ -233,18 +216,6 @@ http.route({
           partialPollCount24h:
             Number.isFinite(health.partialPollCount24h)
               ? Number(health.partialPollCount24h)
-              : null,
-          lastDecisionAt:
-            Number.isFinite(health.lastDecisionAt)
-              ? Number(health.lastDecisionAt)
-              : null,
-          lastDecisionAction:
-            DECISION_ACTION_VALUES.includes(health.lastDecisionAction)
-              ? health.lastDecisionAction
-              : null,
-          decisionsEmittedLastBatch:
-            Number.isFinite(health.decisionsEmittedLastBatch)
-              ? Number(health.decisionsEmittedLastBatch)
               : null,
           lastError:
             typeof health.lastError === "string" && health.lastError.trim() !== ""

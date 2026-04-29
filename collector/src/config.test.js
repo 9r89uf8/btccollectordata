@@ -7,7 +7,6 @@ const ENV_KEYS = [
   "CONVEX_URL",
   "CONVEX_SITE_URL",
   "INGEST_SHARED_SECRET",
-  "DECISION_PERSIST_OFF_CHECKPOINT_WAITS",
 ];
 
 function withEnv(values, fn) {
@@ -34,18 +33,17 @@ function withEnv(values, fn) {
   }
 }
 
-test("off-checkpoint decision persistence is not a silent no-op", () => {
+test("loadCollectorConfig reads explicit Convex site URL from env", () => {
   withEnv(
     {
       CONVEX_URL: "https://example.convex.cloud",
-      DECISION_PERSIST_OFF_CHECKPOINT_WAITS: "true",
+      CONVEX_SITE_URL: "https://example.convex.site",
       INGEST_SHARED_SECRET: "test-secret",
     },
     () => {
-      assert.throws(
-        () => loadCollectorConfig(),
-        /DECISION_PERSIST_OFF_CHECKPOINT_WAITS is not supported/,
-      );
+      const config = loadCollectorConfig();
+
+      assert.equal(config.convexSiteUrl, "https://example.convex.site");
     },
   );
 });

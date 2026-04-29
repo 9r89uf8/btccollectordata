@@ -39,9 +39,6 @@ export default function SiteHeader({ current = "/" }) {
           <NavLink href="/analytics" current={current}>
             Analytics
           </NavLink>
-          <NavLink href="/decisions" current={current}>
-            Decisions
-          </NavLink>
         </div>
       </div>
 

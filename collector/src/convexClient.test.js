@@ -1,28 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  DECISION_ACTIONS,
-  DECISION_CONFIG,
-  REASON_CODES,
-} from "../../packages/shared/src/decisionConfig.js";
 import { createIngestClient } from "./convexClient.js";
 
-function decisionSignal(overrides = {}) {
-  return {
-    action: DECISION_ACTIONS.WAIT,
-    checkpointSecond: 200,
-    decisionVersion: DECISION_CONFIG.version,
-    engineRunId: "engine-run-phase-8",
-    evaluatedAt: 1770000200000,
-    marketSlug: "btc-updown-5m-1770000000",
-    reasonCodes: [REASON_CODES.DISTANCE_TOO_SMALL],
-    secondBucket: 1770000200000,
-    ...overrides,
-  };
-}
-
-test("createIngestClient sends decision signals through the shared ingest envelope", async () => {
+test("createIngestClient sends collector batches through the shared ingest envelope", async () => {
   const originalFetch = globalThis.fetch;
   const originalNow = Date.now;
   let captured = null;
@@ -40,7 +21,7 @@ test("createIngestClient sends decision signals through the shared ingest envelo
       JSON.stringify({
         ok: true,
         results: {
-          decisionSignals: {
+          snapshots: {
             inserted: 1,
             skipped: 0,
           },
@@ -61,11 +42,17 @@ test("createIngestClient sends decision signals through the shared ingest envelo
       convexSiteUrl: "https://example.convex.site/",
       ingestSharedSecret: "secret-phase-8",
     });
-    const signal = decisionSignal();
+    const snapshots = [
+      {
+        marketSlug: "btc-updown-5m-1770000000",
+        secondBucket: 1770000200000,
+        ts: 1770000200123,
+      },
+    ];
     const response = await client.sendBatch({
       collectorName: "caller-should-not-override",
-      decisionSignals: [signal],
       secret: "caller-should-not-override",
+      snapshots,
     });
 
     assert.equal(client.ingestUrl, "https://example.convex.site/ingest/polymarket");
@@ -75,9 +62,8 @@ test("createIngestClient sends decision signals through the shared ingest envelo
     assert.equal(captured.body.secret, "secret-phase-8");
     assert.equal(captured.body.collectorName, "collector-phase-8");
     assert.equal(captured.body.sentAt, 1770000201234);
-    assert.deepEqual(captured.body.decisionSignals, [signal]);
-    assert.equal(captured.body.decisionSignals[0].evaluatedAt, signal.evaluatedAt);
-    assert.equal(response.results.decisionSignals.inserted, 1);
+    assert.deepEqual(captured.body.snapshots, snapshots);
+    assert.equal(response.results.snapshots.inserted, 1);
   } finally {
     globalThis.fetch = originalFetch;
     Date.now = originalNow;
@@ -109,7 +95,7 @@ test("createIngestClient preserves explicit sentAt and reports non-OK responses"
     await assert.rejects(
       () =>
         client.sendBatch({
-          decisionSignals: [decisionSignal()],
+          snapshots: [],
           sentAt: 1770000209876,
         }),
       /Convex ingest failed \(503\): temporary outage/,
@@ -140,7 +126,6 @@ test("createIngestClient rejects oversized batches before fetch", async () => {
     await assert.rejects(
       () =>
         client.sendBatch({
-          decisionSignals: [decisionSignal()],
           padding: "x".repeat(600 * 1024),
           sentAt: 1770000209876,
         }),

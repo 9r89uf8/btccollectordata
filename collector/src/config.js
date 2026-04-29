@@ -208,30 +208,6 @@ export function loadCollectorConfig() {
       readEnv("MARKET_WS_PARITY_TOLERANCE", "0.03", fileEnv),
       0.03,
     ),
-    enableDecisionEngine: toBoolean(
-      readEnv("ENABLE_DECISION_ENGINE", "false", fileEnv),
-      false,
-    ),
-    decisionPriorsRefreshMs: toNumber(
-      readEnv("DECISION_PRIORS_REFRESH_MS", "1800000", fileEnv),
-      1_800_000,
-    ),
-    decisionBankroll: toNumber(
-      readEnv("DECISION_BANKROLL", "1.0", fileEnv),
-      1.0,
-    ),
-    decisionRequireOfficialPriceToBeat: toBoolean(
-      readEnv("DECISION_REQUIRE_OFFICIAL_PRICE_TO_BEAT", "true", fileEnv),
-      true,
-    ),
-    decisionPersistOffCheckpointWaits: toBoolean(
-      readEnv("DECISION_PERSIST_OFF_CHECKPOINT_WAITS", "false", fileEnv),
-      false,
-    ),
-    decisionRuntimeFlagsRefreshMs: toNumber(
-      readEnv("DECISION_RUNTIME_FLAGS_REFRESH_MS", "5000", fileEnv),
-      5000,
-    ),
     logLevel: readEnv("LOG_LEVEL", "info", fileEnv),
     exitAfterMs: toNumber(readEnv("COLLECTOR_EXIT_AFTER_MS", "", fileEnv), null),
   };
@@ -253,14 +229,6 @@ export function loadCollectorConfig() {
   if (missing.length > 0) {
     const error = new Error(
       `Collector config is incomplete. Missing: ${missing.join(", ")}`,
-    );
-    error.code = "CONFIG_INVALID";
-    throw error;
-  }
-
-  if (config.decisionPersistOffCheckpointWaits) {
-    const error = new Error(
-      "DECISION_PERSIST_OFF_CHECKPOINT_WAITS is not supported in decision-v0.1-edge0. Off-checkpoint rows need a separate dedupe policy before persistence is enabled.",
     );
     error.code = "CONFIG_INVALID";
     throw error;
