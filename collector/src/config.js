@@ -260,7 +260,7 @@ export function loadCollectorConfig() {
 
   if (config.decisionPersistOffCheckpointWaits) {
     const error = new Error(
-      "DECISION_PERSIST_OFF_CHECKPOINT_WAITS is not supported in decision-v0.1. Off-checkpoint rows need a separate dedupe policy before persistence is enabled.",
+      "DECISION_PERSIST_OFF_CHECKPOINT_WAITS is not supported in decision-v0.1-edge0. Off-checkpoint rows need a separate dedupe policy before persistence is enabled.",
     );
     error.code = "CONFIG_INVALID";
     throw error;

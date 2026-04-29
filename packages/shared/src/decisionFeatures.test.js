@@ -186,14 +186,14 @@ test("computeRiskFlags separates hard vetoes from soft risks", () => {
   assert.equal(flags.tooManySoftRisks, true);
 });
 
-test("distance and edge requirements rise with soft risk count", () => {
+test("distance requirements rise while test edge is disabled", () => {
   assert.equal(requiredDistanceBps(180, 0), 5);
   assert.equal(requiredDistanceBps(180, 1), 7.5);
   assert.equal(requiredDistanceBps(180, 2), 10);
   assert.equal(requiredDistanceBps(180, 3), 10);
-  assert.equal(requiredEdge(200, 0), 0.05);
-  assert.equal(requiredEdge(200, 1), 0.060000000000000005);
-  assert.equal(requiredEdge(200, 2), 0.07);
+  assert.equal(requiredEdge(200, 0), 0);
+  assert.equal(requiredEdge(200, 1), 0);
+  assert.equal(requiredEdge(200, 2), 0);
 });
 
 test("executionGate checks EV before spread and depth quality", () => {
@@ -209,13 +209,13 @@ test("executionGate checks EV before spread and depth quality", () => {
       accepted: true,
       edge: 0.06000000000000005,
       reasonCodes: [],
-      requiredEdge: 0.05,
+      requiredEdge: 0,
     },
   );
   assert.equal(
     executionGate({
       checkpointSecond: 200,
-      leaderAsk: 0.86,
+      leaderAsk: 0.91,
       leaderSpread: 0.04,
       leaderTopAskDepth: 2,
       pEst: 0.90,

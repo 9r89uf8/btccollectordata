@@ -115,7 +115,7 @@ export const PHASE2_REASON_CODE_FIXTURE = freeze([
 ]);
 
 export const DECISION_CONFIG = deepFreeze({
-  version: "decision-v0.1",
+  version: "decision-v0.1-edge0",
 
   targetCheckpoints: [180, 200, 210, 220, 240],
   checkpointToleranceSec: 3,
@@ -154,16 +154,16 @@ export const DECISION_CONFIG = deepFreeze({
   },
 
   requiredEdge: {
-    180: 0.06,
-    200: 0.05,
-    210: 0.05,
-    220: 0.05,
-    240: 0.04,
+    180: 0,
+    200: 0,
+    210: 0,
+    220: 0,
+    240: 0,
   },
 
   softRiskEdgeTax: {
-    one: 0.01,
-    twoOrMore: 0.02,
+    one: 0,
+    twoOrMore: 0,
   },
 
   maxSpread: 0.03,

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildAnalyticsDashboard } from "./analyticsDashboard.js";
+import {
+  MAX_REFERENCE_VALUES,
+  buildAnalyticsDashboard,
+} from "./analyticsDashboard.js";
 import { MARKET_OUTCOMES } from "./market.js";
 
 function checkpoint({
@@ -233,6 +236,37 @@ test("buildAnalyticsDashboard uses component thresholds for pre-path shapes", ()
   assert.equal(shapeCount("clean-lock"), 30);
   assert.equal(shapeCount("near-line-heavy"), 30);
   assert.equal(shapeCount("multi-flip-chop"), 30);
+});
+
+test("buildAnalyticsDashboard caps reference values for Convex rollup storage", () => {
+  const stabilityRows = Array.from(
+    { length: MAX_REFERENCE_VALUES + 500 },
+    (_value, index) =>
+      stabilityRow(index, {
+        preCurrentLeadAgeSeconds: 90,
+        preFlipCount: index % 12,
+        preNearLineSeconds: index % 180,
+      }),
+  );
+  const analyticsRows = stabilityRows.map((_row, index) => analyticsRow(index));
+  const dashboard = buildAnalyticsDashboard({ analyticsRows, stabilityRows });
+  const { referenceValues } =
+    dashboard.stability.preChopBucketDefinitions;
+
+  assert.equal(referenceValues.nearLinePct.length, MAX_REFERENCE_VALUES);
+  assert.equal(
+    referenceValues.preFlipRatePerMinute.length,
+    MAX_REFERENCE_VALUES,
+  );
+  assert.equal(
+    referenceValues.nearLinePct[0] <= referenceValues.nearLinePct.at(-1),
+    true,
+  );
+  assert.equal(
+    referenceValues.preFlipRatePerMinute[0] <=
+      referenceValues.preFlipRatePerMinute.at(-1),
+    true,
+  );
 });
 
 test("buildAnalyticsDashboard excludes stability rows outside the clean analytics cohort", () => {

@@ -10,6 +10,7 @@ export const COLOR_SUPPORT_FLOOR = 100;
 export const DIAGNOSTIC_SUPPORT_FLOOR = 30;
 export const MIN_DURABILITY_PRIOR_N = 50;
 export const DURABILITY_DENOMINATOR_FLOOR_BPS = 0.5;
+export const MAX_REFERENCE_VALUES = 8000;
 export const TARGET_PATH_RISK_CHECKPOINTS = [180, 200, 210, 220, 240];
 export const DISTANCE_BUCKETS = [
   { id: "le_0_5", label: "<=0.5 bps", max: 0.5 },
@@ -188,6 +189,20 @@ function percentile(values, p) {
 
 function sortedFinite(values) {
   return values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+}
+
+function compactReferenceValues(sortedValues) {
+  if (!Array.isArray(sortedValues) || sortedValues.length <= MAX_REFERENCE_VALUES) {
+    return sortedValues;
+  }
+
+  return Array.from({ length: MAX_REFERENCE_VALUES }, (_value, index) => {
+    const sourceIndex = Math.round(
+      (index * (sortedValues.length - 1)) / (MAX_REFERENCE_VALUES - 1),
+    );
+
+    return sortedValues[sourceIndex];
+  });
 }
 
 // Interpolated percentile for bucket thresholds, where stable cut points matter.
@@ -1087,8 +1102,8 @@ function buildDerivedCheckpointData(stabilityRows) {
       method:
         "Global pooled target-checkpoint empirical terciles over the average of mid-ranked flip rate per minute and near-line percent.",
       referenceValues: {
-        nearLinePct: nearLinePcts,
-        preFlipRatePerMinute: preFlipRates,
+        nearLinePct: compactReferenceValues(nearLinePcts),
+        preFlipRatePerMinute: compactReferenceValues(preFlipRates),
       },
       ranks: {
         degenerate: thresholds?.degenerate ?? false,

@@ -32,7 +32,7 @@ const PHASE11_EXPECTED_REASON_CODES = [
 ];
 
 test("decision config freezes the v0.1 threshold contract", () => {
-  assert.equal(DECISION_CONFIG.version, "decision-v0.1");
+  assert.equal(DECISION_CONFIG.version, "decision-v0.1-edge0");
   assert.deepEqual(DECISION_CONFIG.targetCheckpoints, [180, 200, 210, 220, 240]);
   assert.equal(DECISION_CONFIG.checkpointToleranceSec, 3);
   assert.equal(DECISION_CONFIG.noiseBandBps, 0.5);
@@ -63,15 +63,15 @@ test("decision config freezes the v0.1 threshold contract", () => {
     240: 7.5,
   });
   assert.deepEqual(DECISION_CONFIG.requiredEdge, {
-    180: 0.06,
-    200: 0.05,
-    210: 0.05,
-    220: 0.05,
-    240: 0.04,
+    180: 0,
+    200: 0,
+    210: 0,
+    220: 0,
+    240: 0,
   });
   assert.deepEqual(DECISION_CONFIG.softRiskEdgeTax, {
-    one: 0.01,
-    twoOrMore: 0.02,
+    one: 0,
+    twoOrMore: 0,
   });
   assert.equal(DECISION_CONFIG.maxSpread, 0.03);
   assert.equal(DECISION_CONFIG.maxSoftRiskCount, 2);

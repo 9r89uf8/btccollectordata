@@ -147,7 +147,7 @@ test("decisionSignalDedupeKey uses only the stable identity fields", () => {
 
   assert.equal(
     decisionSignalDedupeKey(first),
-    "btc-updown-5m-1770000000:decision-v0.1:200:1770000200000",
+    "btc-updown-5m-1770000000:decision-v0.1-edge0:200:1770000200000",
   );
   assert.equal(decisionSignalDedupeKey(retry), decisionSignalDedupeKey(first));
   assert.notEqual(

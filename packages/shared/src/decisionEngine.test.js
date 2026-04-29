@@ -175,7 +175,7 @@ test("decide emits deterministic ENTER_UP and does not call Date.now", () => {
     assert.deepEqual(repeat, result);
     assert.equal(result.action, "ENTER_UP");
     assert.equal(result.leader, "up");
-    assert.equal(result.decisionVersion, "decision-v0.1");
+    assert.equal(result.decisionVersion, "decision-v0.1-edge0");
     assert.equal(result.reasonCodes.includes("enter_up_signal"), true);
     assert.equal(result.distanceBucket, "5_7_5");
     assert.ok(result.pEst >= 0.80);
@@ -404,7 +404,7 @@ test("decide applies momentum-against as a soft risk distance threshold", () => 
   assertReasonCodesRegistered(result);
 });
 
-test("decide applies soft-risk penalty through distance and edge gates, not p_est subtraction", () => {
+test("decide applies soft-risk penalty through distance gates, not p_est subtraction", () => {
   const result = decide(
     context({
       marginBps: 8,
@@ -417,7 +417,7 @@ test("decide applies soft-risk penalty through distance and edge gates, not p_es
   assert.equal(result.flags.momentumAgainstLeader, true);
   assert.equal(result.flags.softRiskCount, 1);
   assert.equal(result.requiredDistanceBps, 7.5);
-  assert.ok(Math.abs(result.requiredEdge - 0.07) < 1e-12);
+  assert.equal(result.requiredEdge, 0);
   assert.ok(Math.abs(result.pEst - 0.86) < 1e-12);
   assertReasonCodesRegistered(result);
 });
@@ -471,7 +471,7 @@ test("decide rejects sparse base priors and probabilities below floor", () => {
 test("decide uses top ask EV, spread, and top ask depth execution gates", () => {
   const missingAsk = decide(context({ leaderAsk: null }), priors());
   const missingSpread = decide(context({ leaderSpread: null }), priors());
-  const noEv = decide(context({ leaderAsk: 0.84 }), priors());
+  const noEv = decide(context({ leaderAsk: 0.91 }), priors());
   const wideSpread = decide(context({ leaderSpread: 0.04 }), priors());
   const thinDepth = decide(context({ leaderTopAskDepth: 0.5 }), priors());
 
