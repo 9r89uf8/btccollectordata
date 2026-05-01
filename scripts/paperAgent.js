@@ -130,6 +130,20 @@ function sleep(ms) {
   });
 }
 
+function incrementReason(reasons, reason) {
+  reasons[reason] = (reasons[reason] ?? 0) + 1;
+}
+
+function formatReasons(reasons) {
+  const entries = Object.entries(reasons ?? {}).sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) {
+    return "none";
+  }
+
+  return entries.map(([reason, count]) => `${reason}:${count}`).join(",");
+}
+
 async function settleOpenTrades(client, options) {
   const openTrades = await client.query("paperTrades:listOpen", {
     limit: options.limitOpen,
@@ -170,10 +184,12 @@ async function evaluateActiveMarkets(client, options) {
   ]);
   let inserted = 0;
   let skipped = 0;
+  const skipReasons = {};
 
   for (const market of markets) {
     if (Date.now() < market.windowStartTs || Date.now() > market.windowEndTs) {
       skipped += 1;
+      incrementReason(skipReasons, "upcoming_or_ended");
       continue;
     }
 
@@ -184,6 +200,7 @@ async function evaluateActiveMarkets(client, options) {
 
     if (existing) {
       skipped += 1;
+      incrementReason(skipReasons, "existing_paper_trade");
       continue;
     }
 
@@ -203,6 +220,7 @@ async function evaluateActiveMarkets(client, options) {
 
     if (decision.action !== "paper_trade") {
       skipped += 1;
+      incrementReason(skipReasons, decision.reason);
       continue;
     }
 
@@ -217,6 +235,7 @@ async function evaluateActiveMarkets(client, options) {
     inserted,
     scanned: markets.length,
     skipped,
+    skipReasons,
   };
 }
 
@@ -243,7 +262,7 @@ async function main() {
     const result = await runOnce(client, options);
 
     console.log(
-      `[${new Date().toISOString()}] scanned=${result.scanned} inserted=${result.inserted} settled=${result.settled} skipped=${result.skipped}`,
+      `[${new Date().toISOString()}] scanned=${result.scanned} inserted=${result.inserted} settled=${result.settled} skipped=${result.skipped} skipReasons=${formatReasons(result.skipReasons)}`,
     );
 
     if (options.once) {

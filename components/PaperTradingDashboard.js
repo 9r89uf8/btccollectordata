@@ -26,6 +26,38 @@ function usd(value) {
   return Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
 }
 
+function price(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : "n/a";
+}
+
+function signedUsd(value) {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+
+  return `${value > 0 ? "+" : ""}${usd(value)}`;
+}
+
+function entryDollarDistance(trade) {
+  if (!Number.isFinite(trade?.btcAtEntry) || !Number.isFinite(trade?.priceToBeat)) {
+    return null;
+  }
+
+  return trade.btcAtEntry - trade.priceToBeat;
+}
+
+function elapsedClock(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "n/a";
+  }
+
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
 function dateTime(ts) {
   if (!Number.isFinite(ts)) {
     return "n/a";
@@ -185,6 +217,7 @@ function TradeTable({ rows, settled = false, title }) {
                 <th className={th}>Market</th>
                 <th className={th}>Side</th>
                 <th className={`${th} text-right`}>Entry</th>
+                <th className={`${th} text-right`}>Price</th>
                 <th className={`${th} text-right`}>Distance</th>
                 <th className={`${th} text-right`}>Required</th>
                 <th className={`${th} text-right`}>Risk</th>
@@ -207,9 +240,17 @@ function TradeTable({ rows, settled = false, title }) {
                       {trade.side}
                     </span>
                   </td>
-                  <td className={`${td} text-right`}>T+{trade.entrySecond}s</td>
                   <td className={`${td} text-right`}>
-                    {bps(trade.absDistanceBps)}
+                    {elapsedClock(trade.entrySecond)}
+                  </td>
+                  <td className={`${td} text-right`}>
+                    {price(trade.entryMarketPrice)}
+                  </td>
+                  <td className={`${td} text-right`}>
+                    <span className="block">{bps(trade.absDistanceBps)}</span>
+                    <span className="block text-xs text-stone-500">
+                      {signedUsd(entryDollarDistance(trade))}
+                    </span>
                   </td>
                   <td className={`${td} text-right`}>
                     {bps(trade.requiredDistanceBps)}
