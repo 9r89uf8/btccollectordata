@@ -620,6 +620,103 @@ function buildPreFeatures({
   };
 }
 
+function getLivePriceToBeat(market, overridePriceToBeat) {
+  const explicit = toFiniteNumber(overridePriceToBeat);
+
+  if (explicit !== null) {
+    return explicit;
+  }
+
+  const official = toFiniteNumber(market?.priceToBeatOfficial);
+
+  if (official !== null) {
+    return official;
+  }
+
+  const derived = toFiniteNumber(market?.priceToBeatDerived);
+
+  if (derived !== null) {
+    return derived;
+  }
+
+  return toFiniteNumber(market?.priceToBeat);
+}
+
+function snapshotTs(snapshot) {
+  return toFiniteNumber(snapshot?.secondBucket ?? snapshot?.ts);
+}
+
+function liveLeaderFromMargin(marginBpsValue) {
+  if (!Number.isFinite(marginBpsValue)) {
+    return null;
+  }
+
+  if (Math.abs(marginBpsValue) <= STABILITY_DEADBAND_BPS + EPSILON) {
+    return null;
+  }
+
+  return marginBpsValue > 0 ? "up" : "down";
+}
+
+export function buildLivePathFeatures({
+  leader = null,
+  market,
+  nowTs = Date.now(),
+  priceToBeat: overridePriceToBeat = null,
+  snapshots,
+} = {}) {
+  const priceToBeat = getLivePriceToBeat(market, overridePriceToBeat);
+  const windowStartTs = toFiniteNumber(market?.windowStartTs);
+  const windowEndTs = toFiniteNumber(market?.windowEndTs);
+
+  if (
+    priceToBeat === null ||
+    windowStartTs === null ||
+    windowEndTs === null ||
+    !Number.isFinite(nowTs)
+  ) {
+    return {
+      checkpointSecond: null,
+      checkpointTs: null,
+      latestMarginBps: null,
+      latestSnapshotTs: null,
+      leader: null,
+      priceToBeat,
+      ...emptyPreFeatures(),
+    };
+  }
+
+  const checkpointTs = Math.min(nowTs, windowEndTs);
+  const checkpointSecond = Math.floor((checkpointTs - windowStartTs) / 1000);
+  const cappedSnapshots = (Array.isArray(snapshots) ? snapshots : []).filter((snapshot) => {
+    const ts = snapshotTs(snapshot);
+
+    return ts !== null && ts <= checkpointTs;
+  });
+  const rows = normalizeSnapshots(cappedSnapshots, {
+    priceToBeat,
+    windowEndTs,
+    windowStartTs,
+  });
+  const latestRow = getLatestRowAtOrBefore(rows, checkpointSecond);
+  const resolvedLeader = leader ?? liveLeaderFromMargin(latestRow?.marginBps);
+
+  return {
+    checkpointSecond,
+    checkpointTs,
+    latestMarginBps: latestRow?.marginBps ?? null,
+    latestSnapshotTs: latestRow?.secondBucket ?? null,
+    leader: resolvedLeader,
+    priceToBeat,
+    ...buildPreFeatures({
+      checkpointSecond,
+      leader: resolvedLeader,
+      rows,
+      windowStartTs,
+    }),
+  };
+}
+
 function countPostHardFlips(rows, checkpointSecond, checkpointLeader) {
   const postRows = rows.filter(
     (row) => row.secondsFromWindowStart >= checkpointSecond,

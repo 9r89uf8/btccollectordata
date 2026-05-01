@@ -4,11 +4,20 @@ import { v } from "convex/values";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
+const EXPECTED_BTC_5M_MARKETS_PER_DAY = 288;
 const archiveStatusValue = v.union(
   v.literal("past"),
   v.literal("resolved"),
   v.literal("all"),
 );
+
+function getUtcDayKey(ts) {
+  if (!Number.isFinite(ts)) {
+    return "unknown";
+  }
+
+  return new Date(ts).toISOString().slice(0, 10);
+}
 
 function getActiveSortPriority(market, nowTs) {
   if (market.windowStartTs <= nowTs && nowTs < market.windowEndTs) {
@@ -69,6 +78,65 @@ export const listRecentBtc5m = query({
       .withIndex("by_windowStartTs")
       .order("desc")
       .take(limit);
+  },
+});
+
+export const listCountsByDay = query({
+  args: {
+    limitDays: v.optional(v.number()),
+    scanLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limitDays = Math.max(1, Math.min(args.limitDays ?? 14, 60));
+    const scanLimit = Math.max(
+      limitDays * EXPECTED_BTC_5M_MARKETS_PER_DAY,
+      Math.min(args.scanLimit ?? limitDays * 340, 20_000),
+    );
+    const rows = await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .take(scanLimit);
+    const byDay = new Map();
+
+    for (const market of rows) {
+      const day = getUtcDayKey(market.windowStartTs);
+      const existing =
+        byDay.get(day) ?? {
+          closed: 0,
+          count: 0,
+          day,
+          expected: EXPECTED_BTC_5M_MARKETS_PER_DAY,
+          firstWindowStartTs: market.windowStartTs,
+          resolved: 0,
+          active: 0,
+          lastWindowStartTs: market.windowStartTs,
+        };
+
+      existing.count += 1;
+      existing.active += market.active ? 1 : 0;
+      existing.closed += market.closed ? 1 : 0;
+      existing.resolved += market.resolved ? 1 : 0;
+      existing.firstWindowStartTs = Math.min(
+        existing.firstWindowStartTs,
+        market.windowStartTs,
+      );
+      existing.lastWindowStartTs = Math.max(
+        existing.lastWindowStartTs,
+        market.windowStartTs,
+      );
+      byDay.set(day, existing);
+    }
+
+    return [...byDay.values()]
+      .sort((a, b) => b.day.localeCompare(a.day))
+      .slice(0, limitDays)
+      .map((row) => ({
+        ...row,
+        missing: Math.max(row.expected - row.count, 0),
+        overExpected: Math.max(row.count - row.expected, 0),
+        pctExpected: row.expected > 0 ? row.count / row.expected : null,
+      }));
   },
 });
 

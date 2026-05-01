@@ -24,6 +24,7 @@ import type * as internal_marketAnalytics from "../internal/marketAnalytics.js";
 import type * as internal_marketStabilityAnalytics from "../internal/marketStabilityAnalytics.js";
 import type * as internal_repair from "../internal/repair.js";
 import type * as markets from "../markets.js";
+import type * as paperTrades from "../paperTrades.js";
 import type * as snapshots from "../snapshots.js";
 import type * as status from "../status.js";
 import type * as summaries from "../summaries.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   "internal/marketStabilityAnalytics": typeof internal_marketStabilityAnalytics;
   "internal/repair": typeof internal_repair;
   markets: typeof markets;
+  paperTrades: typeof paperTrades;
   snapshots: typeof snapshots;
   status: typeof status;
   summaries: typeof summaries;

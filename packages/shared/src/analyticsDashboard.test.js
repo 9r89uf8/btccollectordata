@@ -15,6 +15,7 @@ function checkpoint({
   postMinSignedMarginBps = 1,
   preCurrentLeadAgeSeconds = 90,
   preFlipCount = 0,
+  preLastFlipAgeSeconds = preFlipCount === 0 ? null : 30,
   preNearLineSeconds = 10,
 } = {}) {
   return {
@@ -44,7 +45,7 @@ function checkpoint({
     preDirectionChangeCount: preFlipCount,
     preCrossCountLast60s: 0,
     preFlipCount,
-    preLastFlipAgeSeconds: preFlipCount === 0 ? null : 30,
+    preLastFlipAgeSeconds,
     preLeaderDwellPct: 0.7,
     preLongestLeadStreakSeconds: preCurrentLeadAgeSeconds,
     preMaxSnapshotGapMs: 1000,
@@ -58,19 +59,26 @@ function checkpoint({
   };
 }
 
-function stabilityRow(index, checkpointOverrides = {}) {
+function stabilityRow(index, checkpointOverrides = {}, rowOverrides = {}) {
+  const { pathSummary: pathSummaryOverrides, ...rest } = rowOverrides;
+
   return {
     checkpoints: [checkpoint(checkpointOverrides)],
     marketId: `market-${index}`,
     marketSlug: `btc-updown-5m-${index}`,
     pathSummary: {
       closeMarginBps: 4,
+      hardFlipCount: 0,
+      maxDistanceBps: 4,
+      noiseTouchCount: 0,
       pathType: "early-lock",
+      ...pathSummaryOverrides,
     },
     priceToBeat: 100,
     resolvedOutcome: MARKET_OUTCOMES.UP,
     windowEndTs: 300_000 + index,
     windowStartTs: index,
+    ...rest,
   };
 }
 
@@ -236,6 +244,96 @@ test("buildAnalyticsDashboard uses component thresholds for pre-path shapes", ()
   assert.equal(shapeCount("clean-lock"), 30);
   assert.equal(shapeCount("near-line-heavy"), 30);
   assert.equal(shapeCount("multi-flip-chop"), 30);
+});
+
+test("buildAnalyticsDashboard rolls clean markets into ET hourly profiles", () => {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fastHourBaseTs = Date.UTC(2026, 0, 1, 13, 0, 0);
+  const slowHourBaseTs = Date.UTC(2026, 0, 1, 6, 0, 0);
+  const unsupportedHourBaseTs = Date.UTC(2026, 0, 1, 8, 0, 0);
+  const fastRows = Array.from({ length: 60 }, (_value, index) =>
+    stabilityRow(
+      index,
+      {
+        leaderWonAtClose: index < 45,
+        preCurrentLeadAgeSeconds: index < 30 ? 10 : 90,
+        preLastFlipAgeSeconds: index < 30 ? 10 : null,
+      },
+      {
+        pathSummary: {
+          closeMarginBps: 5,
+          maxDistanceBps: 8,
+        },
+        priceToBeat: 100_000,
+        windowEndTs: fastHourBaseTs + index * dayMs + 300_000,
+        windowStartTs: fastHourBaseTs + index * dayMs,
+      },
+    ),
+  );
+  const slowRows = Array.from({ length: 60 }, (_value, index) =>
+    stabilityRow(
+      1000 + index,
+      {
+        preCurrentLeadAgeSeconds: 90,
+        preLastFlipAgeSeconds: null,
+      },
+      {
+        pathSummary: {
+          closeMarginBps: 1,
+          maxDistanceBps: 2,
+        },
+        priceToBeat: 100_000,
+        windowEndTs: slowHourBaseTs + index * dayMs + 300_000,
+        windowStartTs: slowHourBaseTs + index * dayMs,
+      },
+    ),
+  );
+  const lowSupportRows = Array.from({ length: 10 }, (_value, index) =>
+    stabilityRow(
+      2000 + index,
+      {},
+      {
+        pathSummary: {
+          closeMarginBps: 3,
+        },
+        priceToBeat: 100_000,
+        windowEndTs: unsupportedHourBaseTs + index * dayMs + 300_000,
+        windowStartTs: unsupportedHourBaseTs + index * dayMs,
+      },
+    ),
+  );
+  const stabilityRows = [...fastRows, ...slowRows, ...lowSupportRows];
+  const analyticsRows = stabilityRows.map((row, index) =>
+    analyticsRow(index, {
+      marketSlug: row.marketSlug,
+      priceToBeat: row.priceToBeat,
+      resolvedOutcome: row.resolvedOutcome,
+      windowEndTs: row.windowEndTs,
+      windowStartTs: row.windowStartTs,
+    }),
+  );
+  const dashboard = buildAnalyticsDashboard({ analyticsRows, stabilityRows });
+  const fastHour = dashboard.hourly.rows.find((row) => row.hourET === 8);
+  const slowHour = dashboard.hourly.rows.find((row) => row.hourET === 1);
+  const unsupportedHour = dashboard.hourly.rows.find((row) => row.hourET === 3);
+
+  assert.equal(dashboard.hourly.rows.length, 24);
+  assert.equal(fastHour.N, 60);
+  assert.equal(fastHour.supportLevel, "preview");
+  assert.equal(fastHour.speedScore, "fast");
+  assert.equal(fastHour.medianAbsMoveDollars, 50);
+  assert.equal(fastHour.shareAbsMoveGte50, 1);
+  assert.equal(fastHour.checkpointSummary.recentLockRate, 0.5);
+  assert.equal(fastHour.checkpointSummary.flipLossRate, 0.25);
+  assert.equal(fastHour.checkpointSummary.pathRiskRate, 0.25);
+  assert.equal(fastHour.bestCheckpoint.checkpointSecond, 180);
+  assert.equal(slowHour.N, 60);
+  assert.equal(slowHour.speedScore, "slow");
+  assert.equal(slowHour.medianAbsMoveDollars, 10);
+  assert.equal(unsupportedHour.N, 10);
+  assert.equal(unsupportedHour.hidden, true);
+  assert.equal(unsupportedHour.medianAbsMoveDollars, null);
+  assert.equal(unsupportedHour.speedScore, "unsupported");
 });
 
 test("buildAnalyticsDashboard caps reference values for Convex rollup storage", () => {

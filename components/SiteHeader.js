@@ -39,6 +39,9 @@ export default function SiteHeader({ current = "/" }) {
           <NavLink href="/analytics" current={current}>
             Analytics
           </NavLink>
+          <NavLink href="/paper" current={current}>
+            Paper
+          </NavLink>
         </div>
       </div>
 
@@ -54,6 +57,9 @@ export default function SiteHeader({ current = "/" }) {
         </span>
         <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
           BTC analytics v1
+        </span>
+        <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
+          Paper v0
         </span>
       </div>
     </header>

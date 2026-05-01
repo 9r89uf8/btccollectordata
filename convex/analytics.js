@@ -24,6 +24,7 @@ function fromRollup(rollup) {
   return {
     computedAt: rollup.computedAt,
     health: rollup.v1?.health,
+    hourly: rollup.v3?.hourly,
     leader: rollup.v1?.leader,
     stability: rollup.v2?.stability,
   };

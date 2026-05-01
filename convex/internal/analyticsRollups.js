@@ -92,7 +92,9 @@ function compactStabilityCheckpoint(checkpoint) {
     postTouchedNoise: checkpoint.postTouchedNoise,
     preCurrentLeadAgeSeconds: checkpoint.preCurrentLeadAgeSeconds,
     preFlipCount: checkpoint.preFlipCount,
+    preLastFlipAgeSeconds: checkpoint.preLastFlipAgeSeconds,
     preLeaderDwellPct: checkpoint.preLeaderDwellPct,
+    preLongestLeadStreakSeconds: checkpoint.preLongestLeadStreakSeconds,
     preRealizedVolatility60s: checkpoint.preRealizedVolatility60s,
     preRealizedVolatility120s: checkpoint.preRealizedVolatility120s,
     recoveredLeaderWin: checkpoint.recoveredLeaderWin,
@@ -134,6 +136,9 @@ function compactStabilityRow(row) {
     marketSlug: row.marketSlug,
     pathSummary: {
       closeMarginBps: row.pathSummary?.closeMarginBps,
+      hardFlipCount: row.pathSummary?.hardFlipCount,
+      maxDistanceBps: row.pathSummary?.maxDistanceBps,
+      noiseTouchCount: row.pathSummary?.noiseTouchCount,
       pathType: row.pathSummary?.pathType,
     },
     priceToBeat: row.priceToBeat,
@@ -205,6 +210,9 @@ function buildRollupFromRows({ analyticsRows, nowTs, stabilityRows }) {
     },
     v2: {
       stability: dashboard.stability,
+    },
+    v3: {
+      hourly: dashboard.hourly,
     },
   };
 }

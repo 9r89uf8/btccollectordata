@@ -2,6 +2,7 @@
   "name": "btcgt",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "engines": {
     "node": ">=21"
   },
@@ -10,7 +11,9 @@
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
     "collector:dev": "node collector/src/index.js",
-    "test": "node --test packages/shared/src/market.test.js packages/shared/src/snapshot.test.js packages/shared/src/summary.test.js packages/shared/src/repair.test.js packages/shared/src/marketAnalytics.test.js packages/shared/src/marketStabilityAnalytics.test.js packages/shared/src/analyticsDashboard.test.js collector/src/clob.test.js collector/src/config.test.js collector/src/convexClient.test.js collector/src/snapshotter.test.js collector/src/state.test.js collector/src/marketWs.test.js components/marketReplay.test.mjs components/AnalyticsDashboard.source.test.mjs",
+    "paper:agent": "node scripts/paperAgent.js",
+    "paper:replay": "node scripts/paperAgentReplay.js",
+    "test": "node --test --test-isolation=none packages/shared/src/market.test.js packages/shared/src/snapshot.test.js packages/shared/src/summary.test.js packages/shared/src/repair.test.js packages/shared/src/marketAnalytics.test.js packages/shared/src/marketStabilityAnalytics.test.js packages/shared/src/paperTradingEngine.test.js packages/shared/src/analyticsDashboard.test.js collector/src/clob.test.js collector/src/config.test.js collector/src/convexClient.test.js collector/src/snapshotter.test.js collector/src/state.test.js collector/src/marketWs.test.js components/marketReplay.test.mjs components/AnalyticsDashboard.source.test.mjs",
     "build": "next build",
     "start": "next start"
   },

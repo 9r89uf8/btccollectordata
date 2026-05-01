@@ -4,14 +4,29 @@ import {
 } from "./marketAnalytics.js";
 
 export const DASHBOARD_ROLLUP_KEY = "btc-5m-analytics-dashboard";
-export const DASHBOARD_ROLLUP_VERSION = 5;
+export const DASHBOARD_ROLLUP_VERSION = 6;
 export const SUPPORT_FLOOR = 50;
 export const COLOR_SUPPORT_FLOOR = 100;
 export const DIAGNOSTIC_SUPPORT_FLOOR = 30;
+export const HOURLY_SUPPORT_FLOOR = 50;
+export const HOURLY_COLOR_SUPPORT_FLOOR = 100;
+export const HOURLY_STRONG_SUPPORT_FLOOR = 200;
 export const MIN_DURABILITY_PRIOR_N = 50;
 export const DURABILITY_DENOMINATOR_FLOOR_BPS = 0.5;
 export const MAX_REFERENCE_VALUES = 8000;
 export const TARGET_PATH_RISK_CHECKPOINTS = [180, 200, 210, 220, 240];
+const HOURLY_ET_TIME_ZONE = "America/New_York";
+const HOURLY_ET_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  hourCycle: "h23",
+  timeZone: HOURLY_ET_TIME_ZONE,
+  weekday: "short",
+});
+const RECENT_LOCK_SECONDS = 30;
+const MULTI_FLIP_MIN_CROSSES_LAST_60S = 2;
+const MULTI_FLIP_MIN_PRE_FLIPS = 3;
+const NEAR_LINE_HEAVY_SECONDS = 30;
+const NEAR_LINE_HEAVY_PCT = 0.25;
 export const DISTANCE_BUCKETS = [
   { id: "le_0_5", label: "<=0.5 bps", max: 0.5 },
   { id: "0_5_1", label: "0.5-1 bps", min: 0.5, max: 1 },
@@ -262,6 +277,118 @@ function getDayKey(ts) {
   }
 
   return new Date(ts).toISOString().slice(0, 10);
+}
+
+function getHourLabel(hour) {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return "Unknown";
+  }
+
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+function getSessionET(hour) {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return {
+      id: "unknown",
+      label: "Unknown",
+    };
+  }
+
+  if (hour < 6) {
+    return {
+      id: "overnight",
+      label: "Overnight",
+    };
+  }
+
+  if (hour < 9) {
+    return {
+      id: "pre_market",
+      label: "Pre-market",
+    };
+  }
+
+  if (hour < 12) {
+    return {
+      id: "us_morning",
+      label: "US morning",
+    };
+  }
+
+  if (hour < 16) {
+    return {
+      id: "midday",
+      label: "Midday",
+    };
+  }
+
+  if (hour < 20) {
+    return {
+      id: "afternoon_evening",
+      label: "Afternoon/evening",
+    };
+  }
+
+  return {
+    id: "late_evening",
+    label: "Late evening",
+  };
+}
+
+function getEtTimeParts(ts) {
+  if (!Number.isFinite(ts)) {
+    return {
+      hourET: null,
+      hourUTC: null,
+      weekdayET: "unknown",
+    };
+  }
+
+  const parts = Object.fromEntries(
+    HOURLY_ET_FORMATTER.formatToParts(new Date(ts))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  const hourET = Number(parts.hour);
+  const hourUTC = new Date(ts).getUTCHours();
+
+  return {
+    hourET: Number.isInteger(hourET) ? hourET : null,
+    hourUTC: Number.isInteger(hourUTC) ? hourUTC : null,
+    weekdayET: parts.weekday ?? "unknown",
+  };
+}
+
+function getHourlySupportLevel(n) {
+  if (n >= HOURLY_STRONG_SUPPORT_FLOOR) {
+    return "strong";
+  }
+
+  if (n >= HOURLY_COLOR_SUPPORT_FLOOR) {
+    return "soft";
+  }
+
+  if (n >= HOURLY_SUPPORT_FLOOR) {
+    return "preview";
+  }
+
+  return "unsupported";
+}
+
+function summarizeCountMap(counts) {
+  return Object.entries(counts)
+    .map(([key, count]) => ({
+      count,
+      key,
+    }))
+    .sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)));
+}
+
+function getDominantCountKey(counts) {
+  return summarizeCountMap(counts)[0]?.key ?? null;
 }
 
 export function getDistanceBucket(distanceToBeatBps) {
@@ -1699,7 +1826,562 @@ function buildPrePathShapes(stabilityRows, derivedByKey) {
   };
 }
 
-function buildStabilityReport(stabilityRows, leaderRows, cleanAnalyticsSlugs) {
+function createHourlyCheckpointAccumulator(checkpointSecond) {
+  return {
+    N: 0,
+    adverse: [],
+    adverseDrawdown: [],
+    anyFlipAfterT: 0,
+    checkpointSecond,
+    flipLoss: 0,
+    highChop: 0,
+    leaderAges: [],
+    leaderEligibleN: 0,
+    leaderWins: 0,
+    multiFlip: 0,
+    nearLineHeavy: 0,
+    nearLineSeconds: [],
+    noDecisionAtCheckpoint: 0,
+    noisy: 0,
+    preCrossesLast60s: [],
+    preRange60s: [],
+    preRange120s: [],
+    realizedVolatility60s: [],
+    realizedVolatility120s: [],
+    recentLock: 0,
+    recovered: 0,
+    riskEligibleN: 0,
+    stable: 0,
+    unknownPath: 0,
+  };
+}
+
+function isRecentLock(checkpoint) {
+  return (
+    (Number.isFinite(checkpoint?.preCurrentLeadAgeSeconds) &&
+      checkpoint.preCurrentLeadAgeSeconds < RECENT_LOCK_SECONDS) ||
+    (Number.isFinite(checkpoint?.preLastFlipAgeSeconds) &&
+      checkpoint.preLastFlipAgeSeconds < RECENT_LOCK_SECONDS)
+  );
+}
+
+function isMultiFlipChop(checkpoint) {
+  return (
+    (Number.isFinite(checkpoint?.preCrossCountLast60s) &&
+      checkpoint.preCrossCountLast60s >= MULTI_FLIP_MIN_CROSSES_LAST_60S) ||
+    (Number.isFinite(checkpoint?.preFlipCount) &&
+      checkpoint.preFlipCount >= MULTI_FLIP_MIN_PRE_FLIPS)
+  );
+}
+
+function isNearLineHeavy(checkpoint) {
+  const nearLinePct = preNearLinePct(checkpoint);
+
+  return (
+    (Number.isFinite(checkpoint?.preNearLineSeconds) &&
+      checkpoint.preNearLineSeconds >= NEAR_LINE_HEAVY_SECONDS) ||
+    (Number.isFinite(nearLinePct) && nearLinePct >= NEAR_LINE_HEAVY_PCT)
+  );
+}
+
+function addHourlyCheckpoint(accumulator, checkpoint, derived) {
+  if (!checkpoint) {
+    return;
+  }
+
+  const noDecision =
+    checkpoint.checkpointInNoise || checkpoint.leaderWonAtClose === null;
+
+  accumulator.N += 1;
+  accumulator.leaderEligibleN += noDecision ? 0 : 1;
+  accumulator.leaderWins += !noDecision && checkpoint.leaderWonAtClose ? 1 : 0;
+  accumulator.stable += checkpoint.stableLeaderWin ? 1 : 0;
+  accumulator.noisy += checkpoint.noisyLeaderWin ? 1 : 0;
+  accumulator.recovered += checkpoint.recoveredLeaderWin ? 1 : 0;
+  accumulator.flipLoss += checkpoint.flipLoss ? 1 : 0;
+  accumulator.anyFlipAfterT += checkpoint.postAnyHardFlip ? 1 : 0;
+  accumulator.noDecisionAtCheckpoint += noDecision ? 1 : 0;
+  accumulator.unknownPath += checkpoint.unknownPath ? 1 : 0;
+
+  if (Number.isFinite(checkpoint.postMaxAdverseBps)) {
+    accumulator.adverse.push(checkpoint.postMaxAdverseBps);
+  }
+
+  if (Number.isFinite(derived?.postMaxAdverseDrawdownBps)) {
+    accumulator.adverseDrawdown.push(derived.postMaxAdverseDrawdownBps);
+  }
+
+  if (Number.isFinite(checkpoint.preCurrentLeadAgeSeconds)) {
+    accumulator.leaderAges.push(checkpoint.preCurrentLeadAgeSeconds);
+  }
+
+  if (Number.isFinite(checkpoint.preCrossCountLast60s)) {
+    accumulator.preCrossesLast60s.push(checkpoint.preCrossCountLast60s);
+  }
+
+  if (Number.isFinite(checkpoint.preNearLineSeconds)) {
+    accumulator.nearLineSeconds.push(checkpoint.preNearLineSeconds);
+  }
+
+  if (Number.isFinite(checkpoint.preRange60sBps)) {
+    accumulator.preRange60s.push(checkpoint.preRange60sBps);
+  }
+
+  if (Number.isFinite(checkpoint.preRange120sBps)) {
+    accumulator.preRange120s.push(checkpoint.preRange120sBps);
+  }
+
+  if (Number.isFinite(checkpoint.preRealizedVolatility60s)) {
+    accumulator.realizedVolatility60s.push(
+      checkpoint.preRealizedVolatility60s,
+    );
+  }
+
+  if (Number.isFinite(checkpoint.preRealizedVolatility120s)) {
+    accumulator.realizedVolatility120s.push(
+      checkpoint.preRealizedVolatility120s,
+    );
+  }
+
+  const riskEligible = checkpoint.prePathGood === true && Boolean(checkpoint.leader);
+
+  if (!riskEligible) {
+    return;
+  }
+
+  accumulator.riskEligibleN += 1;
+  accumulator.recentLock += isRecentLock(checkpoint) ? 1 : 0;
+  accumulator.multiFlip += isMultiFlipChop(checkpoint) ? 1 : 0;
+  accumulator.nearLineHeavy += isNearLineHeavy(checkpoint) ? 1 : 0;
+  accumulator.highChop += derived?.preChopBucket === "high" ? 1 : 0;
+}
+
+function summarizeHourlyCheckpointAccumulator(accumulator, forceHidden = false) {
+  const total = accumulator.N;
+  const hidden = forceHidden || total < HOURLY_SUPPORT_FLOOR;
+  const fragileWin = accumulator.noisy + accumulator.recovered;
+  const pathRisk =
+    accumulator.flipLoss +
+    accumulator.noDecisionAtCheckpoint +
+    accumulator.unknownPath;
+
+  return {
+    N: total,
+    anyFlipAfterTRate: hidden ? null : ratio(accumulator.anyFlipAfterT, total),
+    checkpointSecond: accumulator.checkpointSecond,
+    colorEligible: total >= HOURLY_COLOR_SUPPORT_FLOOR,
+    flipLossRate: hidden ? null : ratio(accumulator.flipLoss, total),
+    fragileWinRate: hidden ? null : ratio(fragileWin, total),
+    hidden,
+    highChopRate: hidden
+      ? null
+      : ratio(accumulator.highChop, accumulator.riskEligibleN),
+    leaderAgeSecondsMedian: hidden ? null : median(accumulator.leaderAges),
+    leaderEligibleN: accumulator.leaderEligibleN,
+    leaderWinRate: hidden
+      ? null
+      : ratio(accumulator.leaderWins, accumulator.leaderEligibleN),
+    medianMaxAdverseBps: hidden ? null : median(accumulator.adverse),
+    medianMaxAdverseDrawdownBps: hidden
+      ? null
+      : median(accumulator.adverseDrawdown),
+    medianPreCrossCountLast60s: hidden
+      ? null
+      : median(accumulator.preCrossesLast60s),
+    medianPreNearLineSeconds: hidden ? null : median(accumulator.nearLineSeconds),
+    medianPreRange60sBps: hidden ? null : median(accumulator.preRange60s),
+    medianPreRange120sBps: hidden ? null : median(accumulator.preRange120s),
+    medianRealizedVolatility60s: hidden
+      ? null
+      : median(accumulator.realizedVolatility60s),
+    medianRealizedVolatility120s: hidden
+      ? null
+      : median(accumulator.realizedVolatility120s),
+    multiFlipRate: hidden
+      ? null
+      : ratio(accumulator.multiFlip, accumulator.riskEligibleN),
+    nearLineHeavyRate: hidden
+      ? null
+      : ratio(accumulator.nearLineHeavy, accumulator.riskEligibleN),
+    noDecisionAtCheckpointRate: hidden
+      ? null
+      : ratio(accumulator.noDecisionAtCheckpoint, total),
+    pathRiskRate: hidden ? null : ratio(pathRisk, total),
+    p90MaxAdverseBps: hidden ? null : percentile(accumulator.adverse, 0.9),
+    p90MaxAdverseDrawdownBps: hidden
+      ? null
+      : percentile(accumulator.adverseDrawdown, 0.9),
+    recentLockRate: hidden
+      ? null
+      : ratio(accumulator.recentLock, accumulator.riskEligibleN),
+    riskEligibleN: accumulator.riskEligibleN,
+    stableLeaderWinRate: hidden ? null : ratio(accumulator.stable, total),
+  };
+}
+
+function createHourlyAccumulator(hourET) {
+  const checkpointAccumulators = new Map(
+    TARGET_PATH_RISK_CHECKPOINTS.map((checkpointSecond) => [
+      checkpointSecond,
+      createHourlyCheckpointAccumulator(checkpointSecond),
+    ]),
+  );
+
+  return {
+    N: 0,
+    absCloseMoveBps: [],
+    absMoveDollars: [],
+    checkpointAccumulators,
+    down: 0,
+    hardFlipCounts: [],
+    hourET,
+    maxDistanceBps: [],
+    noiseTouchCounts: [],
+    targetAccumulator: createHourlyCheckpointAccumulator("target"),
+    up: 0,
+    utcHourCounts: {},
+    weekdayCounts: {},
+  };
+}
+
+function addHourlyMarket(accumulator, row, timeParts, derivedByKey) {
+  accumulator.N += 1;
+  accumulator.up += row.resolvedOutcome === "up" ? 1 : 0;
+  accumulator.down += row.resolvedOutcome === "down" ? 1 : 0;
+
+  if (Number.isInteger(timeParts.hourUTC)) {
+    increment(accumulator.utcHourCounts, String(timeParts.hourUTC));
+  }
+
+  if (timeParts.weekdayET) {
+    increment(accumulator.weekdayCounts, timeParts.weekdayET);
+  }
+
+  const closeMarginBps = row.pathSummary?.closeMarginBps;
+
+  if (Number.isFinite(closeMarginBps)) {
+    accumulator.absCloseMoveBps.push(Math.abs(closeMarginBps));
+
+    if (Number.isFinite(row.priceToBeat)) {
+      accumulator.absMoveDollars.push(
+        Math.abs((row.priceToBeat * closeMarginBps) / 10000),
+      );
+    }
+  }
+
+  if (Number.isFinite(row.pathSummary?.hardFlipCount)) {
+    accumulator.hardFlipCounts.push(row.pathSummary.hardFlipCount);
+  }
+
+  if (Number.isFinite(row.pathSummary?.maxDistanceBps)) {
+    accumulator.maxDistanceBps.push(row.pathSummary.maxDistanceBps);
+  }
+
+  if (Number.isFinite(row.pathSummary?.noiseTouchCount)) {
+    accumulator.noiseTouchCounts.push(row.pathSummary.noiseTouchCount);
+  }
+
+  for (const checkpointSecond of TARGET_PATH_RISK_CHECKPOINTS) {
+    const checkpoint = getCheckpoint(row, checkpointSecond);
+    const derived = derivedByKey.get(getRowCheckpointKey(row, checkpointSecond));
+
+    addHourlyCheckpoint(accumulator.targetAccumulator, checkpoint, derived);
+    addHourlyCheckpoint(
+      accumulator.checkpointAccumulators.get(checkpointSecond),
+      checkpoint,
+      derived,
+    );
+  }
+}
+
+function summarizeHourlyAccumulator(accumulator) {
+  const hidden = accumulator.N < HOURLY_SUPPORT_FLOOR;
+  const moveN = accumulator.absMoveDollars.length;
+  const session = getSessionET(accumulator.hourET);
+  const checkpoints = TARGET_PATH_RISK_CHECKPOINTS.map((checkpointSecond) =>
+    summarizeHourlyCheckpointAccumulator(
+      accumulator.checkpointAccumulators.get(checkpointSecond),
+      hidden,
+    ),
+  );
+  const dominantHourUTC = getDominantCountKey(accumulator.utcHourCounts);
+
+  return {
+    N: accumulator.N,
+    checkpointSummary: summarizeHourlyCheckpointAccumulator(
+      accumulator.targetAccumulator,
+      hidden,
+    ),
+    checkpoints,
+    colorEligible: accumulator.N >= HOURLY_COLOR_SUPPORT_FLOOR,
+    downRate: hidden ? null : ratio(accumulator.down, accumulator.N),
+    hidden,
+    hourET: accumulator.hourET,
+    hourETLabel: getHourLabel(accumulator.hourET),
+    hourUTC:
+      dominantHourUTC === null || Number.isNaN(Number(dominantHourUTC))
+        ? null
+        : Number(dominantHourUTC),
+    hourUTCCounts: summarizeCountMap(accumulator.utcHourCounts),
+    medianAbsCloseMoveBps: hidden ? null : median(accumulator.absCloseMoveBps),
+    medianAbsMoveDollars: hidden ? null : median(accumulator.absMoveDollars),
+    medianHardFlipCount: hidden ? null : median(accumulator.hardFlipCounts),
+    medianMaxDistanceBps: hidden ? null : median(accumulator.maxDistanceBps),
+    medianNoiseTouchCount: hidden ? null : median(accumulator.noiseTouchCounts),
+    moveN,
+    p90AbsCloseMoveBps: hidden
+      ? null
+      : percentile(accumulator.absCloseMoveBps, 0.9),
+    p90AbsMoveDollars: hidden
+      ? null
+      : percentile(accumulator.absMoveDollars, 0.9),
+    sessionET: session.id,
+    sessionETLabel: session.label,
+    shareAbsMoveGte20: hidden
+      ? null
+      : ratio(
+          accumulator.absMoveDollars.filter((value) => value >= 20).length,
+          moveN,
+        ),
+    shareAbsMoveGte50: hidden
+      ? null
+      : ratio(
+          accumulator.absMoveDollars.filter((value) => value >= 50).length,
+          moveN,
+        ),
+    supportLevel: getHourlySupportLevel(accumulator.N),
+    upRate: hidden ? null : ratio(accumulator.up, accumulator.N),
+    weekdayCounts: summarizeCountMap(accumulator.weekdayCounts),
+  };
+}
+
+function getHourlyThresholds(rows, readValue) {
+  const values = rows
+    .filter((row) => !row.hidden)
+    .map(readValue)
+    .filter((value) => Number.isFinite(value));
+  const low = interpolatedPercentile(values, 1 / 3);
+  const high = interpolatedPercentile(values, 2 / 3);
+
+  return {
+    degenerate:
+      values.length === 0 ||
+      !Number.isFinite(low) ||
+      !Number.isFinite(high) ||
+      low === high,
+    high,
+    low,
+  };
+}
+
+function classifyHighGood(value, thresholds, labels) {
+  if (!Number.isFinite(value)) {
+    return "unknown";
+  }
+
+  if (thresholds.degenerate) {
+    return labels.middle;
+  }
+
+  if (value < thresholds.low) {
+    return labels.low;
+  }
+
+  if (value >= thresholds.high) {
+    return labels.high;
+  }
+
+  return labels.middle;
+}
+
+function classifyLowGood(value, thresholds, labels) {
+  if (!Number.isFinite(value)) {
+    return "unknown";
+  }
+
+  if (thresholds.degenerate) {
+    return labels.middle;
+  }
+
+  if (value <= thresholds.low) {
+    return labels.low;
+  }
+
+  if (value >= thresholds.high) {
+    return labels.high;
+  }
+
+  return labels.middle;
+}
+
+function selectBestHourlyCheckpoint(checkpoints) {
+  const candidates = checkpoints
+    .filter(
+      (checkpoint) =>
+        checkpoint &&
+        !checkpoint.hidden &&
+        Number.isFinite(checkpoint.leaderWinRate) &&
+        Number.isFinite(checkpoint.pathRiskRate),
+    )
+    .map((checkpoint) => ({
+      checkpoint,
+      score:
+        checkpoint.leaderWinRate -
+        checkpoint.pathRiskRate +
+        (checkpoint.stableLeaderWinRate ?? 0) -
+        (checkpoint.flipLossRate ?? 0),
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.checkpoint.N - a.checkpoint.N ||
+        a.checkpoint.checkpointSecond - b.checkpoint.checkpointSecond,
+    );
+
+  return candidates[0]?.checkpoint ?? null;
+}
+
+function withHourlyScores(rows) {
+  const speedThresholds = getHourlyThresholds(
+    rows,
+    (row) => row.medianAbsMoveDollars,
+  );
+  const chopThresholds = getHourlyThresholds(
+    rows,
+    (row) => row.checkpointSummary?.highChopRate,
+  );
+  const reliabilityThresholds = getHourlyThresholds(
+    rows,
+    (row) => row.checkpointSummary?.pathRiskRate,
+  );
+  const scoredRows = rows.map((row) => {
+    if (row.hidden) {
+      return {
+        ...row,
+        bestCheckpoint: null,
+        chopScore: "unsupported",
+        distanceTaxLabel: "No rule",
+        minimumDistanceTaxBuckets: null,
+        reliabilityScore: "unsupported",
+        speedScore: "unsupported",
+      };
+    }
+
+    const speedScore = classifyHighGood(row.medianAbsMoveDollars, speedThresholds, {
+      high: "fast",
+      low: "slow",
+      middle: "normal",
+    });
+    const chopScore = classifyHighGood(
+      row.checkpointSummary?.highChopRate,
+      chopThresholds,
+      {
+        high: "choppy",
+        low: "clean",
+        middle: "normal",
+      },
+    );
+    const reliabilityScore = classifyLowGood(
+      row.checkpointSummary?.pathRiskRate,
+      reliabilityThresholds,
+      {
+        high: "weak",
+        low: "strong",
+        middle: "normal",
+      },
+    );
+    const elevatedFlagRate = [
+      row.checkpointSummary?.recentLockRate,
+      row.checkpointSummary?.multiFlipRate,
+      row.checkpointSummary?.nearLineHeavyRate,
+    ].some((value) => Number.isFinite(value) && value >= 0.4);
+    let minimumDistanceTaxBuckets = 0;
+
+    minimumDistanceTaxBuckets += speedScore === "slow" ? 1 : 0;
+    minimumDistanceTaxBuckets += chopScore === "choppy" ? 1 : 0;
+    minimumDistanceTaxBuckets += reliabilityScore === "weak" ? 1 : 0;
+    minimumDistanceTaxBuckets += elevatedFlagRate ? 1 : 0;
+    minimumDistanceTaxBuckets = Math.min(minimumDistanceTaxBuckets, 2);
+
+    return {
+      ...row,
+      bestCheckpoint: selectBestHourlyCheckpoint(row.checkpoints),
+      chopScore,
+      distanceTaxLabel:
+        minimumDistanceTaxBuckets === 0
+          ? "None"
+          : `+${minimumDistanceTaxBuckets} bucket${
+              minimumDistanceTaxBuckets === 1 ? "" : "s"
+            }`,
+      minimumDistanceTaxBuckets,
+      reliabilityScore,
+      speedScore,
+    };
+  });
+
+  return {
+    rows: scoredRows,
+    thresholds: {
+      chop: chopThresholds,
+      reliability: reliabilityThresholds,
+      speed: speedThresholds,
+    },
+  };
+}
+
+function buildHourlyReport(stabilityRows, derivedByKey) {
+  const hourlyAccumulators = new Map(
+    Array.from({ length: 24 }, (_value, hour) => [
+      hour,
+      createHourlyAccumulator(hour),
+    ]),
+  );
+  let unknownTimeRows = 0;
+
+  for (const row of stabilityRows) {
+    const timeParts = getEtTimeParts(row.windowStartTs);
+
+    if (!Number.isInteger(timeParts.hourET)) {
+      unknownTimeRows += 1;
+      continue;
+    }
+
+    addHourlyMarket(
+      hourlyAccumulators.get(timeParts.hourET),
+      row,
+      timeParts,
+      derivedByKey,
+    );
+  }
+
+  const scored = withHourlyScores(
+    [...hourlyAccumulators.values()].map(summarizeHourlyAccumulator),
+  );
+
+  return {
+    definitions: {
+      riskFlags: {
+        multiFlip: `preCrossCountLast60s >= ${MULTI_FLIP_MIN_CROSSES_LAST_60S} or preFlipCount >= ${MULTI_FLIP_MIN_PRE_FLIPS}`,
+        nearLineHeavy: `preNearLineSeconds >= ${NEAR_LINE_HEAVY_SECONDS} or near-line pct >= ${NEAR_LINE_HEAVY_PCT}`,
+        recentLock: `preCurrentLeadAgeSeconds < ${RECENT_LOCK_SECONDS} or preLastFlipAgeSeconds < ${RECENT_LOCK_SECONDS}`,
+      },
+      scoreMethod:
+        "Speed, chop, and reliability labels use empirical terciles over supported ET hours in the current clean cohort.",
+      timeZone: HOURLY_ET_TIME_ZONE,
+    },
+    rows: scored.rows,
+    support: {
+      colorFloor: HOURLY_COLOR_SUPPORT_FLOOR,
+      floor: HOURLY_SUPPORT_FLOOR,
+      strongFloor: HOURLY_STRONG_SUPPORT_FLOOR,
+    },
+    targetCheckpoints: TARGET_PATH_RISK_CHECKPOINTS,
+    thresholds: scored.thresholds,
+    unknownTimeRows,
+  };
+}
+
+function buildStabilityArtifacts(stabilityRows, leaderRows, cleanAnalyticsSlugs) {
   const cleanRows = stabilityRows.filter((row) =>
     isCleanStability(row, cleanAnalyticsSlugs),
   );
@@ -1707,39 +2389,42 @@ function buildStabilityReport(stabilityRows, leaderRows, cleanAnalyticsSlugs) {
   const durability = buildDurability(cleanRows, derived.byKey);
 
   return {
-    byCheckpoint: buildStabilityByCheckpoint(cleanRows, leaderRows.byCheckpoint),
-    chopBuckets: CHOP_BUCKETS,
-    cleanCount: cleanRows.length,
-    diagnosticDistanceBuckets: getDiagnosticDistanceBuckets().map((bucket) => ({
-      id: bucket.id,
-      label: bucket.label,
-    })),
-    distanceBuckets: DISTANCE_BUCKETS.map((bucket) => ({
-      id: bucket.id,
-      label: bucket.label,
-    })),
-    durability,
-    durabilityPriorDefinitions: durability.priorDefinitions,
-    heatmap: buildStabilityHeatmap(cleanRows),
-    leadAgeBuckets: LEAD_AGE_BUCKETS.map((bucket) => ({
-      id: bucket.id,
-      label: bucket.label,
-    })),
-    leadAgeTables: buildLeadAgeTables(cleanRows),
-    leaderAgeByDistance: buildLeaderAgeByDistance(cleanRows, derived.byKey),
-    metrics: STABILITY_HEATMAP_METRICS,
-    momentumAgreement: buildMomentumAgreement(cleanRows, derived.byKey),
-    momentumAgreementBuckets: MOMENTUM_AGREEMENT_BUCKETS,
-    pathTypes: buildPathTypeDistribution(cleanRows),
-    pathRiskByChop: buildPathRiskByChop(cleanRows, derived.byKey),
-    preChopBucketDefinitions: derived.definitions,
-    preFeatures: buildPreFeatureSummary(cleanRows),
-    prePathShapes: buildPrePathShapes(cleanRows, derived.byKey),
-    targetCheckpoints: TARGET_PATH_RISK_CHECKPOINTS,
-    support: {
-      colorFloor: COLOR_SUPPORT_FLOOR,
-      diagnosticFloor: DIAGNOSTIC_SUPPORT_FLOOR,
-      floor: SUPPORT_FLOOR,
+    hourly: buildHourlyReport(cleanRows, derived.byKey),
+    stability: {
+      byCheckpoint: buildStabilityByCheckpoint(cleanRows, leaderRows.byCheckpoint),
+      chopBuckets: CHOP_BUCKETS,
+      cleanCount: cleanRows.length,
+      diagnosticDistanceBuckets: getDiagnosticDistanceBuckets().map((bucket) => ({
+        id: bucket.id,
+        label: bucket.label,
+      })),
+      distanceBuckets: DISTANCE_BUCKETS.map((bucket) => ({
+        id: bucket.id,
+        label: bucket.label,
+      })),
+      durability,
+      durabilityPriorDefinitions: durability.priorDefinitions,
+      heatmap: buildStabilityHeatmap(cleanRows),
+      leadAgeBuckets: LEAD_AGE_BUCKETS.map((bucket) => ({
+        id: bucket.id,
+        label: bucket.label,
+      })),
+      leadAgeTables: buildLeadAgeTables(cleanRows),
+      leaderAgeByDistance: buildLeaderAgeByDistance(cleanRows, derived.byKey),
+      metrics: STABILITY_HEATMAP_METRICS,
+      momentumAgreement: buildMomentumAgreement(cleanRows, derived.byKey),
+      momentumAgreementBuckets: MOMENTUM_AGREEMENT_BUCKETS,
+      pathTypes: buildPathTypeDistribution(cleanRows),
+      pathRiskByChop: buildPathRiskByChop(cleanRows, derived.byKey),
+      preChopBucketDefinitions: derived.definitions,
+      preFeatures: buildPreFeatureSummary(cleanRows),
+      prePathShapes: buildPrePathShapes(cleanRows, derived.byKey),
+      targetCheckpoints: TARGET_PATH_RISK_CHECKPOINTS,
+      support: {
+        colorFloor: COLOR_SUPPORT_FLOOR,
+        diagnosticFloor: DIAGNOSTIC_SUPPORT_FLOOR,
+        floor: SUPPORT_FLOOR,
+      },
     },
   };
 }
@@ -1751,11 +2436,17 @@ export function buildAnalyticsDashboard({
 } = {}) {
   const leader = buildLeaderAndDistanceReport(analyticsRows);
   const cleanAnalyticsSlugs = getCleanAnalyticsSlugSet(analyticsRows);
+  const { hourly, stability } = buildStabilityArtifacts(
+    stabilityRows,
+    leader,
+    cleanAnalyticsSlugs,
+  );
 
   return {
     computedAt,
     health: buildDatasetHealth(analyticsRows, stabilityRows),
+    hourly,
     leader,
-    stability: buildStabilityReport(stabilityRows, leader, cleanAnalyticsSlugs),
+    stability,
   };
 }
