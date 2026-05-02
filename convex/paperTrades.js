@@ -92,6 +92,18 @@ function clampLimit(value, fallback = 50, max = 100) {
   return Math.max(1, Math.min(value ?? fallback, max));
 }
 
+function scanLimitForStrategyFilter(value, fallback = 50) {
+  return Math.max(100, Math.min(clampLimit(value, fallback) * 6, 1000));
+}
+
+function applyStrategyFilter(rows, strategyVersion, limit) {
+  const filtered = strategyVersion
+    ? rows.filter((trade) => trade.strategyVersion === strategyVersion)
+    : rows;
+
+  return filtered.slice(0, limit);
+}
+
 function requireNonEmpty(value, field) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`paper trade is missing ${field}`);
@@ -240,39 +252,63 @@ export const insertDecision = mutation({
 export const listOpen = query({
   args: {
     limit: v.optional(v.number()),
+    strategyVersion: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const limit = clampLimit(args.limit);
+    const rows = await ctx.db
       .query("paper_trades")
       .withIndex("by_status_windowEndTs", (q) => q.eq("status", "open"))
       .order("asc")
-      .take(clampLimit(args.limit));
+      .take(
+        args.strategyVersion
+          ? scanLimitForStrategyFilter(args.limit)
+          : limit,
+      );
+
+    return applyStrategyFilter(rows, args.strategyVersion, limit);
   },
 });
 
 export const listRecent = query({
   args: {
     limit: v.optional(v.number()),
+    strategyVersion: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const limit = clampLimit(args.limit);
+    const rows = await ctx.db
       .query("paper_trades")
       .withIndex("by_entryTs")
       .order("desc")
-      .take(clampLimit(args.limit));
+      .take(
+        args.strategyVersion
+          ? scanLimitForStrategyFilter(args.limit)
+          : limit,
+      );
+
+    return applyStrategyFilter(rows, args.strategyVersion, limit);
   },
 });
 
 export const listSettled = query({
   args: {
     limit: v.optional(v.number()),
+    strategyVersion: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const limit = clampLimit(args.limit);
+    const rows = await ctx.db
       .query("paper_trades")
       .withIndex("by_status_windowEndTs", (q) => q.eq("status", "settled"))
       .order("desc")
-      .take(clampLimit(args.limit));
+      .take(
+        args.strategyVersion
+          ? scanLimitForStrategyFilter(args.limit)
+          : limit,
+      );
+
+    return applyStrategyFilter(rows, args.strategyVersion, limit);
   },
 });
 

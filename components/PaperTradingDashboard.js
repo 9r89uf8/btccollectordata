@@ -2,10 +2,24 @@
 
 import { useQuery } from "convex/react";
 import Link from "next/link";
+import { useState } from "react";
 
 import { api } from "@/convex/_generated/api";
 
-const STRATEGY_VERSION = "leader_distance_v0";
+const STRATEGIES = [
+  {
+    label: "Flat",
+    stakeLabel: "$5 fixed",
+    title: "Leader distance v0 flat",
+    value: "leader_distance_v0",
+  },
+  {
+    label: "Dynamic",
+    stakeLabel: "$1/$3/$5",
+    title: "Leader distance v0 dynamic",
+    value: "leader_distance_v0_dynamic_sizing",
+  },
+];
 const panel =
   "rounded-[1.2rem] border border-black/10 bg-white/88 p-5 shadow-[0_10px_30px_rgba(30,30,30,0.05)]";
 const th = "py-2 pr-4 text-xs uppercase tracking-[0.14em] text-stone-500";
@@ -134,11 +148,43 @@ function MetricCard({ label, value, subvalue }) {
   );
 }
 
-function Summary({ stats }) {
+function StrategyTabs({ selected, strategies, onSelect }) {
+  return (
+    <div className="flex flex-wrap gap-2 rounded-[0.85rem] border border-black/10 bg-white/80 p-1">
+      {strategies.map((strategy) => {
+        const active = strategy.value === selected.value;
+
+        return (
+          <button
+            key={strategy.value}
+            type="button"
+            onClick={() => onSelect(strategy)}
+            className={`min-h-10 rounded-[0.65rem] px-4 py-2 text-left text-sm font-semibold transition-colors ${
+              active
+                ? "bg-stone-950 text-white shadow-sm"
+                : "text-stone-600 hover:bg-stone-100 hover:text-stone-950"
+            }`}
+          >
+            <span className="block">{strategy.label}</span>
+            <span
+              className={`block text-xs font-medium ${
+                active ? "text-stone-300" : "text-stone-500"
+              }`}
+            >
+              {strategy.stakeLabel}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Summary({ stats, strategy }) {
   const overall = stats?.overall ?? {};
 
   return (
-    <Panel label="Paper state" title="Leader distance v0">
+    <Panel label="Paper state" title={strategy.title}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Trades"
@@ -308,14 +354,17 @@ function TradeTable({ rows, settled = false, title }) {
 }
 
 export default function PaperTradingDashboard() {
+  const [selectedStrategy, setSelectedStrategy] = useState(STRATEGIES[1]);
   const stats = useQuery(api.paperTrades.getStats, {
-    strategyVersion: STRATEGY_VERSION,
+    strategyVersion: selectedStrategy.value,
   });
   const openTrades = useQuery(api.paperTrades.listOpen, {
     limit: 25,
+    strategyVersion: selectedStrategy.value,
   });
   const settledTrades = useQuery(api.paperTrades.listSettled, {
     limit: 25,
+    strategyVersion: selectedStrategy.value,
   });
 
   if (!stats || openTrades === undefined || settledTrades === undefined) {
@@ -324,7 +373,12 @@ export default function PaperTradingDashboard() {
 
   return (
     <div className="space-y-5">
-      <Summary stats={stats} />
+      <StrategyTabs
+        selected={selectedStrategy}
+        strategies={STRATEGIES}
+        onSelect={setSelectedStrategy}
+      />
+      <Summary stats={stats} strategy={selectedStrategy} />
       <div className="grid gap-5 xl:grid-cols-2">
         <CohortTable rows={stats.byEntryWindow} title="Entry windows" />
         <CohortTable rows={stats.byRiskCount} title="Risk count" />
