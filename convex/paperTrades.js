@@ -110,11 +110,16 @@ async function getTradeByMarketAndStrategy(ctx, { marketSlug, strategyVersion })
 function createStatsAccumulator(label) {
   return {
     avgEntryDistanceBps: null,
+    avgEntryPrice: null,
+    avgStakeUsd: null,
     entryDistanceTotalBps: 0,
+    entryPriceTotal: 0,
     label,
     losses: 0,
     pnlUsd: 0,
     pnlUsdCount: 0,
+    roi: null,
+    stakeTotal: 0,
     settled: 0,
     total: 0,
     winRate: null,
@@ -124,9 +129,14 @@ function createStatsAccumulator(label) {
 
 function addToStats(accumulator, trade) {
   accumulator.total += 1;
+  accumulator.stakeTotal += trade.stakeUsd;
 
   if (Number.isFinite(trade.absDistanceBps)) {
     accumulator.entryDistanceTotalBps += trade.absDistanceBps;
+  }
+
+  if (Number.isFinite(trade.entryMarketPrice)) {
+    accumulator.entryPriceTotal += trade.entryMarketPrice;
   }
 
   if (trade.status === "settled" && trade.correct !== null) {
@@ -143,6 +153,7 @@ function addToStats(accumulator, trade) {
 
 function finishStats(accumulator) {
   const decisions = accumulator.wins + accumulator.losses;
+  const pnlUsd = accumulator.pnlUsdCount > 0 ? accumulator.pnlUsd : null;
 
   return {
     ...accumulator,
@@ -150,7 +161,15 @@ function finishStats(accumulator) {
       accumulator.total > 0
         ? accumulator.entryDistanceTotalBps / accumulator.total
         : null,
-    pnlUsd: accumulator.pnlUsdCount > 0 ? accumulator.pnlUsd : null,
+    avgEntryPrice:
+      accumulator.total > 0 ? accumulator.entryPriceTotal / accumulator.total : null,
+    avgStakeUsd:
+      accumulator.total > 0 ? accumulator.stakeTotal / accumulator.total : null,
+    pnlUsd,
+    roi:
+      pnlUsd !== null && accumulator.stakeTotal > 0
+        ? pnlUsd / accumulator.stakeTotal
+        : null,
     winRate: decisions > 0 ? accumulator.wins / decisions : null,
   };
 }

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  computeDynamicStakeUsd,
   computeRiskFlags,
   maybeCreatePaperDecision,
   settlePaperTrade,
@@ -87,6 +88,31 @@ test("maybeCreatePaperDecision creates a clean leader-distance trade", () => {
   assert.equal(decision.trade.runId, "test-run");
 });
 
+test("maybeCreatePaperDecision supports a later decision window", () => {
+  const earlyDecision = maybeCreatePaperDecision({
+    config: {
+      decisionStartSecond: 240,
+    },
+    market: market(),
+    nowTs: WINDOW_START_TS + 239_000,
+    snapshots: snapshotsThrough(239, () => 8),
+  });
+  const onTimeDecision = maybeCreatePaperDecision({
+    config: {
+      decisionStartSecond: 240,
+    },
+    market: market(),
+    nowTs: WINDOW_START_TS + 240_000,
+    snapshots: snapshotsThrough(240, () => 4),
+  });
+
+  assert.equal(earlyDecision.action, "skip");
+  assert.equal(earlyDecision.reason, "before_decision_window");
+  assert.equal(onTimeDecision.action, "paper_trade");
+  assert.equal(onTimeDecision.trade.entrySecond, 240);
+  assert.equal(onTimeDecision.trade.requiredDistanceBps, 4);
+});
+
 test("nearLineHeavy uses the shared 2 bps pre-path definition", () => {
   const nowTs = WINDOW_START_TS + 220_000;
   const decision = maybeCreatePaperDecision({
@@ -139,6 +165,54 @@ test("computeRiskFlags applies V0 dashboard risk definitions", () => {
     nearLineHeavy: true,
     recentLock: true,
   });
+});
+
+test("computeDynamicStakeUsd sizes by clearance, risk, and payout", () => {
+  assert.equal(
+    computeDynamicStakeUsd({
+      absDistanceBps: 10,
+      entryMarketPrice: 0.89,
+      requiredDistanceBps: 5,
+      riskCount: 0,
+    }),
+    5,
+  );
+  assert.equal(
+    computeDynamicStakeUsd({
+      absDistanceBps: 9,
+      entryMarketPrice: 0.94,
+      requiredDistanceBps: 6.5,
+      riskCount: 1,
+    }),
+    3,
+  );
+  assert.equal(
+    computeDynamicStakeUsd({
+      absDistanceBps: 20,
+      entryMarketPrice: 0.98,
+      requiredDistanceBps: 6.5,
+      riskCount: 1,
+    }),
+    1,
+  );
+});
+
+test("maybeCreatePaperDecision can use dynamic paper sizing", () => {
+  const nowTs = WINDOW_START_TS + 220_000;
+  const decision = maybeCreatePaperDecision({
+    config: {
+      sizingMode: "dynamic",
+    },
+    market: market(),
+    nowTs,
+    snapshots: snapshotsThrough(220, () => 8).map((row) => ({
+      ...row,
+      upDisplayed: 0.94,
+    })),
+  });
+
+  assert.equal(decision.action, "paper_trade");
+  assert.equal(decision.trade.stakeUsd, 3);
 });
 
 test("settlePaperTrade settles idempotent PnL fields from official outcome", () => {

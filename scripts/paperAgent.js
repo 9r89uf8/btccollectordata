@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { ConvexHttpClient } from "convex/browser";
 
 import {
+  PAPER_DYNAMIC_SIZING_STRATEGY_VERSION,
   PAPER_STRATEGY_VERSION,
   maybeCreatePaperDecision,
   settlePaperTrade,
@@ -60,11 +61,15 @@ function readEnv(name, fallback, fileEnv) {
 
 function parseArgs(argv) {
   const options = {
+    decisionEndSecond: 285,
+    decisionStartSecond: 220,
     intervalMs: 1000,
     limitOpen: 100,
     once: false,
     runId: `paper-agent-${new Date().toISOString()}`,
+    sizingMode: "flat",
     stakeUsd: 5,
+    strategyVersionExplicit: false,
     strategyVersion: PAPER_STRATEGY_VERSION,
   };
 
@@ -80,6 +85,16 @@ function parseArgs(argv) {
 
     if (arg === "--once") {
       options.once = true;
+    } else if (arg === "--decision-start-second" && next) {
+      options.decisionStartSecond = Math.floor(
+        readPositiveNumber(next, options.decisionStartSecond),
+      );
+      index += 1;
+    } else if (arg === "--decision-end-second" && next) {
+      options.decisionEndSecond = Math.floor(
+        readPositiveNumber(next, options.decisionEndSecond),
+      );
+      index += 1;
     } else if (arg === "--interval-ms" && next) {
       options.intervalMs = Math.max(250, readPositiveNumber(next, options.intervalMs));
       index += 1;
@@ -89,17 +104,31 @@ function parseArgs(argv) {
     } else if (arg === "--run-id" && next) {
       options.runId = next;
       index += 1;
+    } else if (arg === "--sizing-mode" && next) {
+      options.sizingMode = ["flat", "dynamic"].includes(next)
+        ? next
+        : options.sizingMode;
+      index += 1;
     } else if (arg === "--stake-usd" && next) {
       options.stakeUsd = readPositiveNumber(next, options.stakeUsd);
       index += 1;
     } else if (arg === "--strategy-version" && next) {
       options.strategyVersion = next;
+      options.strategyVersionExplicit = true;
       index += 1;
     }
   }
 
+  if (options.sizingMode === "dynamic" && !options.strategyVersionExplicit) {
+    options.strategyVersion = PAPER_DYNAMIC_SIZING_STRATEGY_VERSION;
+  }
+
   if (!Number.isFinite(options.stakeUsd) || options.stakeUsd <= 0) {
     throw new Error("--stake-usd must be a positive number");
+  }
+
+  if (options.decisionStartSecond > options.decisionEndSecond) {
+    throw new Error("--decision-start-second must be <= --decision-end-second");
   }
 
   return options;
@@ -209,6 +238,13 @@ async function evaluateActiveMarkets(client, options) {
       slug: market.slug,
     });
     const decision = maybeCreatePaperDecision({
+      config: {
+        decisionEndSecond: options.decisionEndSecond,
+        decisionStartSecond: options.decisionStartSecond,
+        sizingMode: options.sizingMode,
+        stakeUsd: options.stakeUsd,
+        strategyVersion: options.strategyVersion,
+      },
       latestBtcTick: latestBtc,
       market,
       nowTs: Date.now(),
@@ -254,7 +290,7 @@ async function main() {
   const client = createClient();
 
   console.log(
-    `Paper agent starting: strategy=${options.strategyVersion} runId=${options.runId} once=${options.once}`,
+    `Paper agent starting: strategy=${options.strategyVersion} sizing=${options.sizingMode} window=T+${options.decisionStartSecond}-${options.decisionEndSecond} runId=${options.runId} once=${options.once}`,
   );
 
   do {

@@ -6,6 +6,8 @@ import {
 } from "./marketStabilityAnalytics.js";
 
 export const PAPER_STRATEGY_VERSION = "leader_distance_v0";
+export const PAPER_DYNAMIC_SIZING_STRATEGY_VERSION =
+  "leader_distance_v0_dynamic_sizing";
 export const PAPER_ENGINE_VERSION = 1;
 export const DEFAULT_PAPER_TRADING_CONFIG = {
   baseThreshold220To239: 5,
@@ -18,6 +20,14 @@ export const DEFAULT_PAPER_TRADING_CONFIG = {
   nearLineBps: PRE_NEAR_LINE_BPS,
   noiseBps: STABILITY_DEADBAND_BPS,
   oneRiskTaxBps: 2.5,
+  dynamicHighMaxEntryMarketPrice: 0.9,
+  dynamicHighMinClearanceBps: 3,
+  dynamicHighStakeUsd: 5,
+  dynamicLowStakeUsd: 1,
+  dynamicMediumMaxEntryMarketPrice: 0.95,
+  dynamicMediumMinClearanceBps: 1,
+  dynamicMediumStakeUsd: 3,
+  sizingMode: "flat",
   stakeUsd: 5,
   staleBtcMs: 30_000,
   strategyVersion: PAPER_STRATEGY_VERSION,
@@ -272,6 +282,65 @@ function baseRequiredBps(secondsElapsed, config) {
     : config.baseThreshold220To239;
 }
 
+export function computeDynamicStakeUsd({
+  absDistanceBps,
+  config: overrideConfig = {},
+  entryMarketPrice,
+  requiredDistanceBps,
+  riskCount,
+} = {}) {
+  const config = {
+    ...DEFAULT_PAPER_TRADING_CONFIG,
+    ...overrideConfig,
+  };
+  const clearanceBps =
+    Number.isFinite(absDistanceBps) && Number.isFinite(requiredDistanceBps)
+      ? absDistanceBps - requiredDistanceBps
+      : null;
+
+  if (
+    riskCount === 0 &&
+    Number.isFinite(clearanceBps) &&
+    clearanceBps >= config.dynamicHighMinClearanceBps - EPSILON &&
+    Number.isFinite(entryMarketPrice) &&
+    entryMarketPrice <= config.dynamicHighMaxEntryMarketPrice
+  ) {
+    return config.dynamicHighStakeUsd;
+  }
+
+  if (
+    riskCount <= 1 &&
+    Number.isFinite(clearanceBps) &&
+    clearanceBps >= config.dynamicMediumMinClearanceBps - EPSILON &&
+    Number.isFinite(entryMarketPrice) &&
+    entryMarketPrice <= config.dynamicMediumMaxEntryMarketPrice
+  ) {
+    return config.dynamicMediumStakeUsd;
+  }
+
+  return config.dynamicLowStakeUsd;
+}
+
+function resolveStakeUsd({
+  absDistanceBps,
+  config,
+  entryMarketPrice,
+  requiredDistanceBps,
+  riskCount,
+}) {
+  if (config.sizingMode !== "dynamic") {
+    return config.stakeUsd;
+  }
+
+  return computeDynamicStakeUsd({
+    absDistanceBps,
+    config,
+    entryMarketPrice,
+    requiredDistanceBps,
+    riskCount,
+  });
+}
+
 export function maybeCreatePaperDecision({
   config: overrideConfig = {},
   existingTrade = null,
@@ -288,9 +357,12 @@ export function maybeCreatePaperDecision({
     ...DEFAULT_PAPER_TRADING_CONFIG,
     ...overrideConfig,
   };
+  if (stakeUsd != null) {
+    config.stakeUsd = stakeUsd;
+  }
+
   const resolvedStrategyVersion =
     strategyVersion ?? config.strategyVersion ?? PAPER_STRATEGY_VERSION;
-  const resolvedStakeUsd = stakeUsd ?? config.stakeUsd;
 
   if (!market) {
     return skip("missing_market");
@@ -416,6 +488,13 @@ export function maybeCreatePaperDecision({
   }
 
   const entryMarketPrice = getDisplayedPrice(latestSnapshot, side);
+  const resolvedStakeUsd = resolveStakeUsd({
+    absDistanceBps,
+    config,
+    entryMarketPrice,
+    requiredDistanceBps,
+    riskCount,
+  });
   const now = nowTs;
 
   return {

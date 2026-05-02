@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import Link from "next/link";
 
 import { api } from "@/convex/_generated/api";
 
@@ -148,8 +149,13 @@ function Summary({ stats }) {
         <MetricCard
           label="Avg entry"
           value={bps(overall.avgEntryDistanceBps)}
+          subvalue={`price ${price(overall.avgEntryPrice)}`}
         />
-        <MetricCard label="PnL" value={usd(overall.pnlUsd)} />
+        <MetricCard
+          label="PnL"
+          value={usd(overall.pnlUsd)}
+          subvalue={`${usd(overall.stakeTotal)} risked / ROI ${pct(overall.roi)}`}
+        />
       </div>
     </Panel>
   );
@@ -165,8 +171,10 @@ function CohortTable({ rows, title }) {
               <th className={th}>Cohort</th>
               <th className={`${th} text-right`}>Trades</th>
               <th className={`${th} text-right`}>Win rate</th>
+              <th className={`${th} text-right`}>Avg stake</th>
               <th className={`${th} text-right`}>Avg entry</th>
               <th className={`${th} text-right`}>PnL</th>
+              <th className={`${th} text-right`}>ROI</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
@@ -177,10 +185,12 @@ function CohortTable({ rows, title }) {
                 </td>
                 <td className={`${td} text-right`}>{n(row.total)}</td>
                 <td className={`${td} text-right`}>{pct(row.winRate)}</td>
+                <td className={`${td} text-right`}>{usd(row.avgStakeUsd)}</td>
                 <td className={`${td} text-right`}>
                   {bps(row.avgEntryDistanceBps)}
                 </td>
                 <td className={`${td} text-right`}>{usd(row.pnlUsd)}</td>
+                <td className={`${td} text-right`}>{pct(row.roi)}</td>
               </tr>
             ))}
           </tbody>
@@ -202,6 +212,17 @@ function RiskFlags({ flags }) {
   return active.join(", ");
 }
 
+function MarketLink({ slug }) {
+  return (
+    <Link
+      href={`/markets/${slug}`}
+      className="text-stone-950 underline decoration-stone-300 underline-offset-4 transition-colors hover:text-sky-700 hover:decoration-sky-300"
+    >
+      {slug}
+    </Link>
+  );
+}
+
 function TradeTable({ rows, settled = false, title }) {
   return (
     <Panel label={settled ? "Settled" : "Open"} title={title}>
@@ -218,6 +239,7 @@ function TradeTable({ rows, settled = false, title }) {
                 <th className={th}>Side</th>
                 <th className={`${th} text-right`}>Entry</th>
                 <th className={`${th} text-right`}>Price</th>
+                <th className={`${th} text-right`}>Stake</th>
                 <th className={`${th} text-right`}>Distance</th>
                 <th className={`${th} text-right`}>Required</th>
                 <th className={`${th} text-right`}>Risk</th>
@@ -231,7 +253,7 @@ function TradeTable({ rows, settled = false, title }) {
               {rows.map((trade) => (
                 <tr key={trade._id}>
                   <td className={`${td} font-medium text-stone-950`}>
-                    {trade.marketSlug}
+                    <MarketLink slug={trade.marketSlug} />
                   </td>
                   <td className={td}>
                     <span
@@ -246,6 +268,7 @@ function TradeTable({ rows, settled = false, title }) {
                   <td className={`${td} text-right`}>
                     {price(trade.entryMarketPrice)}
                   </td>
+                  <td className={`${td} text-right`}>{usd(trade.stakeUsd)}</td>
                   <td className={`${td} text-right`}>
                     <span className="block">{bps(trade.absDistanceBps)}</span>
                     <span className="block text-xs text-stone-500">

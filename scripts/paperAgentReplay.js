@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { ConvexHttpClient } from "convex/browser";
 
 import {
+  PAPER_DYNAMIC_SIZING_STRATEGY_VERSION,
   PAPER_STRATEGY_VERSION,
   maybeCreatePaperDecision,
   settlePaperTrade,
@@ -60,9 +61,12 @@ function readEnv(name, fallback, fileEnv) {
 
 function parseArgs(argv) {
   const options = {
+    decisionEndSecond: 285,
+    decisionStartSecond: 220,
     jsonOutput: path.join(repoRoot, "paper_trading_replay_report.json"),
     limit: 200,
     output: path.join(repoRoot, "paper_trading_replay_report.md"),
+    replayMode: "compare",
     stakeUsd: 5,
     strategyVersion: PAPER_STRATEGY_VERSION,
   };
@@ -80,11 +84,26 @@ function parseArgs(argv) {
     if (arg === "--limit" && next) {
       options.limit = Math.max(1, Math.floor(readPositiveNumber(next, options.limit)));
       index += 1;
+    } else if (arg === "--decision-start-second" && next) {
+      options.decisionStartSecond = Math.floor(
+        readPositiveNumber(next, options.decisionStartSecond),
+      );
+      index += 1;
+    } else if (arg === "--decision-end-second" && next) {
+      options.decisionEndSecond = Math.floor(
+        readPositiveNumber(next, options.decisionEndSecond),
+      );
+      index += 1;
     } else if (arg === "--output" && next) {
       options.output = path.resolve(repoRoot, next);
       index += 1;
     } else if (arg === "--json-output" && next) {
       options.jsonOutput = path.resolve(repoRoot, next);
+      index += 1;
+    } else if (arg === "--replay-mode" && next) {
+      options.replayMode = ["flat", "dynamic", "compare"].includes(next)
+        ? next
+        : options.replayMode;
       index += 1;
     } else if (arg === "--stake-usd" && next) {
       options.stakeUsd = readPositiveNumber(next, options.stakeUsd);
@@ -99,7 +118,49 @@ function parseArgs(argv) {
     throw new Error("--stake-usd must be a positive number");
   }
 
+  if (options.decisionStartSecond > options.decisionEndSecond) {
+    throw new Error("--decision-start-second must be <= --decision-end-second");
+  }
+
   return options;
+}
+
+function getReplayScenarios(options) {
+  const flat = {
+    config: {
+      decisionEndSecond: options.decisionEndSecond,
+      decisionStartSecond: options.decisionStartSecond,
+      sizingMode: "flat",
+      stakeUsd: options.stakeUsd,
+      strategyVersion: options.strategyVersion,
+    },
+    id: "flat",
+    label: `Flat $${options.stakeUsd}`,
+    stakeUsd: options.stakeUsd,
+    strategyVersion: options.strategyVersion,
+  };
+  const dynamic = {
+    config: {
+      decisionEndSecond: options.decisionEndSecond,
+      decisionStartSecond: options.decisionStartSecond,
+      sizingMode: "dynamic",
+      strategyVersion: PAPER_DYNAMIC_SIZING_STRATEGY_VERSION,
+    },
+    id: "dynamic",
+    label: "Dynamic $1/$3/$5",
+    stakeUsd: null,
+    strategyVersion: PAPER_DYNAMIC_SIZING_STRATEGY_VERSION,
+  };
+
+  if (options.replayMode === "flat") {
+    return [flat];
+  }
+
+  if (options.replayMode === "dynamic") {
+    return [dynamic];
+  }
+
+  return [flat, dynamic];
 }
 
 function createClient() {
@@ -162,18 +223,23 @@ function hasReplayInputs(market, snapshots) {
   );
 }
 
-function simulateMarket({ market, snapshots, options }) {
+function simulateMarket({ market, scenario, snapshots }) {
   const skipReasons = {};
 
-  for (let second = 220; second <= 285; second += 1) {
+  for (
+    let second = scenario.config.decisionStartSecond;
+    second <= scenario.config.decisionEndSecond;
+    second += 1
+  ) {
     const nowTs = market.windowStartTs + second * 1000;
     const decision = maybeCreatePaperDecision({
+      config: scenario.config,
       market,
       nowTs,
       runId: "replay",
       snapshots,
-      stakeUsd: options.stakeUsd,
-      strategyVersion: options.strategyVersion,
+      stakeUsd: scenario.stakeUsd,
+      strategyVersion: scenario.strategyVersion,
     });
 
     if (decision.action === "paper_trade") {
@@ -212,11 +278,16 @@ function simulateMarket({ market, snapshots, options }) {
 function createAccumulator(label) {
   return {
     avgEntryDistanceBps: null,
+    avgEntryPrice: null,
+    avgStakeUsd: null,
     distanceTotal: 0,
+    entryPriceTotal: 0,
     label,
     losses: 0,
     pnlUsd: 0,
     pnlUsdCount: 0,
+    roi: null,
+    stakeTotal: 0,
     total: 0,
     winRate: null,
     wins: 0,
@@ -226,6 +297,11 @@ function createAccumulator(label) {
 function addTrade(accumulator, trade) {
   accumulator.total += 1;
   accumulator.distanceTotal += trade.absDistanceBps;
+  accumulator.stakeTotal += trade.stakeUsd;
+
+  if (Number.isFinite(trade.entryMarketPrice)) {
+    accumulator.entryPriceTotal += trade.entryMarketPrice;
+  }
 
   if (trade.correct === true) {
     accumulator.wins += 1;
@@ -241,19 +317,29 @@ function addTrade(accumulator, trade) {
 
 function finishAccumulator(accumulator) {
   const decisions = accumulator.wins + accumulator.losses;
+  const pnlUsd =
+    accumulator.pnlUsdCount > 0 ? accumulator.pnlUsd : null;
 
   return {
     ...accumulator,
     avgEntryDistanceBps:
       accumulator.total > 0 ? accumulator.distanceTotal / accumulator.total : null,
-    pnlUsd: accumulator.pnlUsdCount > 0 ? accumulator.pnlUsd : null,
+    avgEntryPrice:
+      accumulator.total > 0 ? accumulator.entryPriceTotal / accumulator.total : null,
+    avgStakeUsd:
+      accumulator.total > 0 ? accumulator.stakeTotal / accumulator.total : null,
+    pnlUsd,
+    roi:
+      pnlUsd !== null && accumulator.stakeTotal > 0
+        ? pnlUsd / accumulator.stakeTotal
+        : null,
     winRate: decisions > 0 ? accumulator.wins / decisions : null,
   };
 }
 
-function summarizeReplay({ markets, results }) {
+function summarizeReplay({ markets, results, scenario }) {
   const trades = results.map((result) => result.trade).filter(Boolean);
-  const overall = createAccumulator("All trades");
+  const overall = createAccumulator(scenario.label);
   const byWindow = new Map([
     ["T+220-239", createAccumulator("T+220-239")],
     ["T+240-285", createAccumulator("T+240-285")],
@@ -303,6 +389,11 @@ function summarizeReplay({ markets, results }) {
       trades: trades.length,
     },
     overall: finishAccumulator(overall),
+    scenario: {
+      id: scenario.id,
+      label: scenario.label,
+      strategyVersion: scenario.strategyVersion,
+    },
     skipReasons,
     trades,
   };
@@ -320,47 +411,60 @@ function money(value) {
   return Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
 }
 
-function statsTable(rows) {
+function comparisonTable(summaries) {
   const lines = [
-    "| Cohort | Trades | Win rate | Avg entry distance | PnL |",
-    "|---|---:|---:|---:|---:|",
+    "| Strategy | Trades | Win rate | Avg stake | Dollars risked | Gross PnL | ROI | Avg distance | Avg price |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
 
-  for (const row of rows) {
+  for (const summary of summaries) {
     lines.push(
-      `| ${row.label} | ${row.total} | ${pct(row.winRate)} | ${number(row.avgEntryDistanceBps)} bps | ${money(row.pnlUsd)} |`,
+      `| ${summary.scenario.label} | ${summary.counts.trades} | ${pct(summary.overall.winRate)} | ${money(summary.overall.avgStakeUsd)} | ${money(summary.overall.stakeTotal)} | ${money(summary.overall.pnlUsd)} | ${pct(summary.overall.roi)} | ${number(summary.overall.avgEntryDistanceBps)} bps | ${number(summary.overall.avgEntryPrice, 3)} |`,
     );
   }
 
   return lines.join("\n");
 }
 
-function renderMarkdown({ generatedAt, options, summary }) {
+function statsTable(rows) {
   const lines = [
-    "# Paper Trading Replay Report",
-    "",
-    `Generated: ${new Date(generatedAt).toISOString()}`,
-    `Strategy: ${options.strategyVersion}`,
-    `Stake: $${options.stakeUsd}`,
-    "",
-    "## Summary",
+    "| Cohort | Trades | Win rate | Avg stake | Dollars risked | PnL | ROI | Avg entry distance |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
+  ];
+
+  for (const row of rows) {
+    lines.push(
+      `| ${row.label} | ${row.total} | ${pct(row.winRate)} | ${money(row.avgStakeUsd)} | ${money(row.stakeTotal)} | ${money(row.pnlUsd)} | ${pct(row.roi)} | ${number(row.avgEntryDistanceBps)} bps |`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function renderSingleSummary(summary) {
+  const lines = [
+    `## ${summary.scenario.label}`,
     "",
     `- Markets scanned: ${summary.counts.markets}`,
     `- Paper trades: ${summary.counts.trades}`,
     `- No-trade markets: ${summary.counts.noTrade}`,
     `- Win rate: ${pct(summary.overall.winRate)}`,
-    `- Simulated PnL: ${money(summary.overall.pnlUsd)}`,
+    `- Average stake: ${money(summary.overall.avgStakeUsd)}`,
+    `- Dollars risked: ${money(summary.overall.stakeTotal)}`,
+    `- Simulated gross PnL: ${money(summary.overall.pnlUsd)}`,
+    `- ROI on dollars risked: ${pct(summary.overall.roi)}`,
     `- Average entry distance: ${number(summary.overall.avgEntryDistanceBps)} bps`,
+    `- Average entry price: ${number(summary.overall.avgEntryPrice, 3)}`,
     "",
-    "## Entry Window",
+    "### Entry Window",
     "",
     statsTable(summary.byWindow),
     "",
-    "## Risk Count",
+    "### Risk Count",
     "",
     statsTable(summary.byRiskCount),
     "",
-    "## Skip Reasons",
+    "### Skip Reasons",
     "",
     "| Reason | Count |",
     "|---|---:|",
@@ -368,16 +472,41 @@ function renderMarkdown({ generatedAt, options, summary }) {
       .sort((a, b) => b[1] - a[1])
       .map(([reason, count]) => `| ${reason} | ${count} |`),
     "",
-    "## Trades",
+    "### Trades",
     "",
-    "| Market | Entry | Side | Distance | Required | Risk | Correct | PnL |",
-    "|---|---:|---|---:|---:|---:|---|---:|",
+    "| Market | Entry | Side | Stake | Price | Distance | Required | Risk | Correct | PnL |",
+    "|---|---:|---|---:|---:|---:|---:|---:|---|---:|",
     ...summary.trades.slice(0, 100).map((trade) =>
-      `| ${trade.marketSlug} | T+${trade.entrySecond}s | ${trade.side} | ${number(trade.absDistanceBps)} | ${number(trade.requiredDistanceBps)} | ${trade.riskCount} | ${trade.correct} | ${money(trade.pnlUsd)} |`,
+      `| ${trade.marketSlug} | T+${trade.entrySecond}s | ${trade.side} | ${money(trade.stakeUsd)} | ${number(trade.entryMarketPrice, 3)} | ${number(trade.absDistanceBps)} | ${number(trade.requiredDistanceBps)} | ${trade.riskCount} | ${trade.correct} | ${money(trade.pnlUsd)} |`,
     ),
   ];
 
   return lines.join("\n");
+}
+
+function renderMarkdown({ generatedAt, options, summaries }) {
+  const lines = [
+    "# Paper Trading Replay Report",
+    "",
+    `Generated: ${new Date(generatedAt).toISOString()}`,
+    `Replay mode: ${options.replayMode}`,
+    `Decision window: T+${options.decisionStartSecond}-${options.decisionEndSecond}`,
+    "",
+  ];
+
+  if (summaries.length > 1) {
+    lines.push("## Sizing Comparison");
+    lines.push("");
+    lines.push(comparisonTable(summaries));
+    lines.push("");
+  }
+
+  for (const summary of summaries) {
+    lines.push(renderSingleSummary(summary));
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd();
 }
 
 async function main() {
@@ -385,44 +514,58 @@ async function main() {
   const client = createClient();
   const generatedAt = Date.now();
   const markets = await listResolvedMarkets(client, options.limit);
-  const results = [];
+  const scenarios = getReplayScenarios(options);
+  const resultsByScenario = Object.fromEntries(
+    scenarios.map((scenario) => [scenario.id, []]),
+  );
 
   for (const market of markets) {
     const snapshots = await listSnapshots(client, market.slug);
 
     if (!hasReplayInputs(market, snapshots)) {
-      results.push({
-        marketSlug: market.slug,
-        skipReasons: {
-          missing_replay_inputs: 1,
-        },
-        trade: null,
-      });
+      for (const scenario of scenarios) {
+        resultsByScenario[scenario.id].push({
+          marketSlug: market.slug,
+          skipReasons: {
+            missing_replay_inputs: 1,
+          },
+          trade: null,
+        });
+      }
       continue;
     }
 
-    results.push(
-      simulateMarket({
-        market,
-        options,
-        snapshots,
-      }),
-    );
+    for (const scenario of scenarios) {
+      resultsByScenario[scenario.id].push(
+        simulateMarket({
+          market,
+          scenario,
+          snapshots,
+        }),
+      );
+    }
   }
 
-  const summary = summarizeReplay({ markets, results });
+  const summaries = scenarios.map((scenario) =>
+    summarizeReplay({
+      markets,
+      results: resultsByScenario[scenario.id],
+      scenario,
+    }),
+  );
   const report = {
     generatedAt,
     options,
-    results,
-    summary,
+    resultsByScenario,
+    summaries,
+    summary: summaries[0] ?? null,
   };
 
-  fs.writeFileSync(options.output, renderMarkdown({ generatedAt, options, summary }));
+  fs.writeFileSync(options.output, renderMarkdown({ generatedAt, options, summaries }));
   fs.writeFileSync(options.jsonOutput, JSON.stringify(report, null, 2));
 
   console.log(
-    `Replay complete: ${summary.counts.trades} trades across ${summary.counts.markets} markets. Markdown: ${options.output}. JSON: ${options.jsonOutput}.`,
+    `Replay complete: ${summaries.map((summary) => `${summary.scenario.id}=${summary.counts.trades} trades, ${money(summary.overall.pnlUsd)} PnL`).join("; ")} across ${markets.length} markets. Markdown: ${options.output}. JSON: ${options.jsonOutput}.`,
   );
 }
 
