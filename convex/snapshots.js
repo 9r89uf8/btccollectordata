@@ -2,6 +2,34 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 
 const REPLAY_SNAPSHOT_BUFFER_MS = 30 * 1000;
+const FINAL_FORENSICS_KEYS = [
+  "btcBinanceReceivedAgeMs",
+  "btcBinanceReceivedAt",
+  "btcBinanceTs",
+  "btcChainlinkReceivedAgeMs",
+  "btcChainlinkReceivedAt",
+  "btcChainlinkTs",
+  "downBookAgeMs",
+  "downBookTs",
+  "downLastAgeMs",
+  "downLastTs",
+  "upBookAgeMs",
+  "upBookTs",
+  "upLastAgeMs",
+  "upLastTs",
+];
+
+function compactOptionalFields(source, keys) {
+  const fields = {};
+
+  for (const key of keys) {
+    if (source[key] !== undefined) {
+      fields[key] = source[key];
+    }
+  }
+
+  return fields;
+}
 
 function compactReplaySnapshot(snapshot) {
   return {
@@ -28,6 +56,7 @@ function compactReplaySnapshot(snapshot) {
     upDisplayed: snapshot.upDisplayed,
     upSpread: snapshot.upSpread,
     writtenAt: snapshot.writtenAt,
+    ...compactOptionalFields(snapshot, FINAL_FORENSICS_KEYS),
   };
 }
 

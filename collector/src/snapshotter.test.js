@@ -40,6 +40,8 @@ test("buildMarketSnapshots treats midpoint-only poll data as current when timest
   assert.equal(snapshot.downDisplayed, 0.48);
   assert.equal(snapshot.displayRuleUsed, DISPLAY_RULES.MIDPOINT);
   assert.equal(snapshot.sourceQuality, SNAPSHOT_QUALITY.GOOD);
+  assert.equal(Object.hasOwn(snapshot, "btcChainlinkTs"), false);
+  assert.equal(Object.hasOwn(snapshot, "upLastTs"), false);
 });
 
 test("buildMarketSnapshots keeps last-trade-only snapshots usable when books are unavailable", () => {
@@ -66,6 +68,66 @@ test("buildMarketSnapshots keeps last-trade-only snapshots usable when books are
   assert.equal(snapshot.downDisplayed, 0.49);
   assert.equal(snapshot.displayRuleUsed, DISPLAY_RULES.LAST_TRADE);
   assert.equal(snapshot.sourceQuality, SNAPSHOT_QUALITY.GOOD);
+});
+
+test("buildMarketSnapshots stores timing for final 10 second forensics only", () => {
+  const finalNowTs = baseMarket.windowEndTs - 5000;
+  const [snapshot] = buildMarketSnapshots({
+    markets: [baseMarket],
+    marketData: {
+      booksByTokenId: new Map([
+        [
+          "up-token",
+          {
+            asks: [{ price: "0.56", size: "7" }],
+            bids: [{ price: "0.54", size: "5" }],
+            timestamp: finalNowTs - 500,
+          },
+        ],
+        [
+          "down-token",
+          {
+            asks: [{ price: "0.47", size: "3" }],
+            bids: [{ price: "0.45", size: "4" }],
+            timestamp: finalNowTs - 700,
+          },
+        ],
+      ]),
+      endpointErrors: [],
+      lastTradesByTokenId: new Map([
+        ["up-token", { price: 0.55, timestamp: finalNowTs - 3000 }],
+        ["down-token", { price: 0.46, timestamp: finalNowTs - 4000 }],
+      ]),
+      midpointsByTokenId: new Map(),
+    },
+    latestChainlinkTick: {
+      price: 74525,
+      receivedAt: finalNowTs - 200,
+      ts: finalNowTs - 900,
+    },
+    latestBinanceTick: {
+      price: 74526,
+      receivedAt: finalNowTs - 250,
+      ts: finalNowTs - 800,
+    },
+    nowTs: finalNowTs,
+  });
+
+  assert.equal(snapshot.secondsFromWindowStart, 295);
+  assert.equal(snapshot.upBookTs, finalNowTs - 500);
+  assert.equal(snapshot.upBookAgeMs, 500);
+  assert.equal(snapshot.downBookTs, finalNowTs - 700);
+  assert.equal(snapshot.downBookAgeMs, 700);
+  assert.equal(snapshot.upLastTs, finalNowTs - 3000);
+  assert.equal(snapshot.upLastAgeMs, 3000);
+  assert.equal(snapshot.downLastTs, finalNowTs - 4000);
+  assert.equal(snapshot.downLastAgeMs, 4000);
+  assert.equal(snapshot.btcChainlinkTs, finalNowTs - 900);
+  assert.equal(snapshot.btcChainlinkReceivedAt, finalNowTs - 200);
+  assert.equal(snapshot.btcChainlinkReceivedAgeMs, 200);
+  assert.equal(snapshot.btcBinanceTs, finalNowTs - 800);
+  assert.equal(snapshot.btcBinanceReceivedAt, finalNowTs - 250);
+  assert.equal(snapshot.btcBinanceReceivedAgeMs, 250);
 });
 
 test("buildMarketSnapshots marks empty market data as gap instead of disappearing", () => {

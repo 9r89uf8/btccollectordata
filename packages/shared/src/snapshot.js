@@ -22,6 +22,7 @@ export const SNAPSHOT_FINALIZATION_GRACE_MS = 5000;
 export const DISPLAYED_PRICE_MAX_SPREAD = 0.1;
 export const BOOK_STALE_MS = 5000;
 export const BTC_STALE_MS = 10000;
+export const FINAL_FORENSICS_WINDOW_MS = 10 * 1000;
 
 export function getSnapshotSecondBucket(ts) {
   return Math.floor(ts / SNAPSHOT_BUCKET_MS) * SNAPSHOT_BUCKET_MS;

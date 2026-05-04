@@ -18,6 +18,7 @@ import type * as internal_analyticsRollupRefresh from "../internal/analyticsRoll
 import type * as internal_analyticsRollups from "../internal/analyticsRollups.js";
 import type * as internal_btcReferences from "../internal/btcReferences.js";
 import type * as internal_discovery from "../internal/discovery.js";
+import type * as internal_finalFlipReport from "../internal/finalFlipReport.js";
 import type * as internal_finalize from "../internal/finalize.js";
 import type * as internal_health from "../internal/health.js";
 import type * as internal_ingestion from "../internal/ingestion.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "internal/analyticsRollups": typeof internal_analyticsRollups;
   "internal/btcReferences": typeof internal_btcReferences;
   "internal/discovery": typeof internal_discovery;
+  "internal/finalFlipReport": typeof internal_finalFlipReport;
   "internal/finalize": typeof internal_finalize;
   "internal/health": typeof internal_health;
   "internal/ingestion": typeof internal_ingestion;

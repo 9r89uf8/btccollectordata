@@ -1,6 +1,7 @@
 import {
   BOOK_STALE_MS,
   BTC_STALE_MS,
+  FINAL_FORENSICS_WINDOW_MS,
   SNAPSHOT_QUALITY,
   deriveDisplayedPrice,
   getSecondsFromWindowStart,
@@ -33,6 +34,17 @@ function getTopLevel(levels) {
   };
 }
 
+function ageMs(ts, nowTs) {
+  return Number.isFinite(ts) ? nowTs - ts : null;
+}
+
+function isFinalForensicsSnapshot(secondBucket, market) {
+  return (
+    secondBucket >= market.windowEndTs - FINAL_FORENSICS_WINDOW_MS &&
+    secondBucket <= market.windowEndTs
+  );
+}
+
 function buildOutcomeMarketView(
   tokenId,
   booksByTokenId,
@@ -59,10 +71,9 @@ function buildOutcomeMarketView(
   });
   const hasCurrentPolledData =
     book !== null || lastTrade !== null || midpoint !== null;
-  const bookTs =
-    normalizeFeedTimestamp(book?.timestamp) ??
-    normalizeFeedTimestamp(lastTrade?.timestamp) ??
-    (hasCurrentPolledData ? nowTs : null);
+  const lastTs = normalizeFeedTimestamp(lastTrade?.timestamp);
+  const quoteTs = normalizeFeedTimestamp(book?.timestamp);
+  const bookTs = quoteTs ?? lastTs ?? (hasCurrentPolledData ? nowTs : null);
 
   return {
     bid: topBid.price,
@@ -76,6 +87,8 @@ function buildOutcomeMarketView(
     depthBidTop: topBid.size,
     depthAskTop: topAsk.size,
     bookTs,
+    lastTs,
+    quoteTs,
   };
 }
 
@@ -111,6 +124,36 @@ function deriveMarketImbalance(upDisplayed, downDisplayed) {
   return upDisplayed + downDisplayed - 1;
 }
 
+function buildFinalForensicsFields({
+  downView,
+  latestBinanceTick,
+  latestChainlinkTick,
+  nowTs,
+  upView,
+}) {
+  const chainlinkTs = toFiniteNumber(latestChainlinkTick?.ts);
+  const chainlinkReceivedAt = toFiniteNumber(latestChainlinkTick?.receivedAt);
+  const binanceTs = toFiniteNumber(latestBinanceTick?.ts);
+  const binanceReceivedAt = toFiniteNumber(latestBinanceTick?.receivedAt);
+
+  return {
+    btcBinanceReceivedAgeMs: ageMs(binanceReceivedAt, nowTs),
+    btcBinanceReceivedAt: binanceReceivedAt,
+    btcBinanceTs: binanceTs,
+    btcChainlinkReceivedAgeMs: ageMs(chainlinkReceivedAt, nowTs),
+    btcChainlinkReceivedAt: chainlinkReceivedAt,
+    btcChainlinkTs: chainlinkTs,
+    downBookAgeMs: ageMs(downView.quoteTs, nowTs),
+    downBookTs: downView.quoteTs,
+    downLastAgeMs: ageMs(downView.lastTs, nowTs),
+    downLastTs: downView.lastTs,
+    upBookAgeMs: ageMs(upView.quoteTs, nowTs),
+    upBookTs: upView.quoteTs,
+    upLastAgeMs: ageMs(upView.lastTs, nowTs),
+    upLastTs: upView.lastTs,
+  };
+}
+
 export function buildMarketSnapshots({
   markets,
   marketData,
@@ -143,6 +186,15 @@ export function buildMarketSnapshots({
       nowTs,
     });
     const phase = getSnapshotPhase(secondBucket, market.windowStartTs, market.windowEndTs);
+    const finalForensicsFields = isFinalForensicsSnapshot(secondBucket, market)
+      ? buildFinalForensicsFields({
+          downView,
+          latestBinanceTick,
+          latestChainlinkTick,
+          nowTs,
+          upView,
+        })
+      : null;
 
     snapshots.push({
       marketSlug: market.slug,
@@ -180,6 +232,7 @@ export function buildMarketSnapshots({
       ),
       sourceQuality,
       writtenAt: nowTs,
+      ...(finalForensicsFields ?? {}),
     });
   }
 
