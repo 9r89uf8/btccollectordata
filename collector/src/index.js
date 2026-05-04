@@ -9,6 +9,7 @@ import { CAPTURE_MODES } from "../../packages/shared/src/market.js";
 import { fetchClobMarketData } from "./clob.js";
 import { loadCollectorConfig } from "./config.js";
 import { createIngestClient, createQueryClient } from "./convexClient.js";
+import { getFinalWindowMarkets } from "./finalWindow.js";
 import { startMarketWsClient } from "./marketWs.js";
 import { startRtdsClient } from "./rtds.js";
 import { buildMarketSnapshots, compareSnapshotParity } from "./snapshotter.js";
@@ -122,6 +123,7 @@ async function main() {
     activeMarkets: [],
     collectorSeq: 0,
     flushInFlight: false,
+    finalSnapshotPollInFlight: false,
     gapCount24h: 0,
     lastBatchSentAt: null,
     lastBtcTickAt: null,
@@ -251,12 +253,12 @@ async function main() {
     state.lastMarketEventAt = snapshots[snapshots.length - 1].ts;
   }
 
-  function queueGapSnapshots(nowTs, reason) {
+  function queueGapSnapshots(nowTs, reason, markets = state.activeMarkets) {
     const gapSnapshots = buildMarketSnapshots({
       latestBinanceTick: state.latestBinanceTick,
       latestChainlinkTick: state.latestChainlinkTick,
       marketData: createEmptyMarketData(),
-      markets: state.activeMarkets,
+      markets,
       nowTs,
     });
 
@@ -268,7 +270,7 @@ async function main() {
     queueSnapshots(gapSnapshots, CAPTURE_MODES.POLL);
 
     console.warn("[collector] queued fallback gap snapshots", {
-      activeMarkets: state.activeMarkets.length,
+      activeMarkets: markets.length,
       reason,
       ts: nowTs,
     });
@@ -473,12 +475,30 @@ async function main() {
     }
   }
 
-  async function captureSnapshots() {
+  async function captureSnapshots({ finalWindowOnly = false } = {}) {
     if (state.shuttingDown || state.activeMarkets.length === 0) {
       return;
     }
 
-    if (state.snapshotPollInFlight) {
+    const pollStartedAt = Date.now();
+    const pollMarkets = finalWindowOnly
+      ? getFinalWindowMarkets(
+          state.activeMarkets,
+          pollStartedAt,
+          config.finalSnapshotWindowMs,
+        )
+      : state.activeMarkets;
+
+    if (pollMarkets.length === 0) {
+      return;
+    }
+
+    const inFlightKey = finalWindowOnly
+      ? "finalSnapshotPollInFlight"
+      : "snapshotPollInFlight";
+    const pollScope = finalWindowOnly ? "final-window" : "regular";
+
+    if (state[inFlightKey]) {
       const nowTs = Date.now();
       state.pollOverrunCount24h += 1;
       state.lastPollStartedAt = nowTs;
@@ -486,17 +506,18 @@ async function main() {
       state.lastPollDurationMs = 0;
       state.lastPollStatus = "overrun";
       state.lastPollEndpointErrors = ["previous poll was still in flight"];
-      queueGapSnapshots(nowTs, "poll_overrun");
+      if (!finalWindowOnly) {
+        queueGapSnapshots(nowTs, "poll_overrun", pollMarkets);
+      }
       return;
     }
 
-    state.snapshotPollInFlight = true;
-    const pollStartedAt = Date.now();
+    state[inFlightKey] = true;
     state.lastPollStartedAt = pollStartedAt;
     state.lastPollEndpointErrors = [];
 
     try {
-      const activeAssetIds = getActiveAssetIds(state.activeMarkets);
+      const activeAssetIds = getActiveAssetIds(pollMarkets);
       let nowTs = Date.now();
       let pollSnapshots = [];
       let pollError = null;
@@ -520,7 +541,7 @@ async function main() {
           latestBinanceTick: state.latestBinanceTick,
           latestChainlinkTick: state.latestChainlinkTick,
           marketData: pollMarketData,
-          markets: state.activeMarkets,
+          markets: pollMarkets,
           nowTs,
         });
       } catch (error) {
@@ -530,8 +551,9 @@ async function main() {
         state.lastPollEndpointErrors = [formatError(error)];
         console.error("[collector] polling snapshot capture failed", {
           error: formatError(error),
+          scope: pollScope,
         });
-        queueGapSnapshots(nowTs, "poll_failure");
+        queueGapSnapshots(nowTs, "poll_failure", pollMarkets);
       }
 
       const wsSnapshots = config.enableMarketWs
@@ -539,7 +561,7 @@ async function main() {
             latestBinanceTick: state.latestBinanceTick,
             latestChainlinkTick: state.latestChainlinkTick,
             marketData: marketStateStore.buildMarketData(),
-            markets: state.activeMarkets,
+            markets: pollMarkets,
             nowTs,
           }).filter(hasSnapshotSignal)
         : [];
@@ -576,7 +598,7 @@ async function main() {
       const canUseWsAsPrimary =
         config.enableMarketWs &&
         config.marketWsPrimary &&
-        wsSnapshots.length === state.activeMarkets.length;
+        wsSnapshots.length === pollMarkets.length;
 
       if (canUseWsAsPrimary) {
         queueSnapshots(wsSnapshots, CAPTURE_MODES.WS);
@@ -590,7 +612,7 @@ async function main() {
       state.lastPollCompletedAt = Date.now();
       state.lastPollDurationMs = state.lastPollCompletedAt - pollStartedAt;
     } finally {
-      state.snapshotPollInFlight = false;
+      state[inFlightKey] = false;
     }
   }
 
@@ -676,6 +698,8 @@ async function main() {
     marketWsPrimary: config.marketWsPrimary,
     marketWsUrl: config.polymarketMarketWss,
     rtdsUrl: config.polymarketRtdsWss,
+    finalSnapshotPollMs: config.finalSnapshotPollMs,
+    finalSnapshotWindowMs: config.finalSnapshotWindowMs,
     snapshotPollMs: config.snapshotPollMs,
   });
 
@@ -702,6 +726,11 @@ async function main() {
     setInterval(() => {
       void captureSnapshots();
     }, config.snapshotPollMs),
+  );
+  intervals.push(
+    setInterval(() => {
+      void captureSnapshots({ finalWindowOnly: true });
+    }, config.finalSnapshotPollMs),
   );
 
   if (Number.isFinite(config.exitAfterMs) && config.exitAfterMs > 0) {

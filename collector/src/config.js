@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_COLLECTOR_NAME } from "../../packages/shared/src/ingest.js";
+import { FINAL_FORENSICS_WINDOW_MS } from "../../packages/shared/src/snapshot.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -180,6 +181,14 @@ export function loadCollectorConfig() {
     snapshotPollMs: toNumber(
       readEnv("SNAPSHOT_POLL_MS", "1000", fileEnv),
       1000,
+    ),
+    finalSnapshotPollMs: toNumber(
+      readEnv("FINAL_SNAPSHOT_POLL_MS", "1000", fileEnv),
+      1000,
+    ),
+    finalSnapshotWindowMs: toNumber(
+      readEnv("FINAL_SNAPSHOT_WINDOW_MS", String(FINAL_FORENSICS_WINDOW_MS), fileEnv),
+      FINAL_FORENSICS_WINDOW_MS,
     ),
     clobBatchSize: toNumber(readEnv("CLOB_BATCH_SIZE", "500", fileEnv), 500),
     clobRequestTimeoutMs: toNumber(
