@@ -21,6 +21,8 @@ function fromRollup(rollup) {
         stabilityRows: [],
       }),
       marketCountsByDay: [],
+      rollupMode: "empty",
+      rowLimits: null,
     };
   }
 
@@ -30,6 +32,8 @@ function fromRollup(rollup) {
     hourly: rollup.v3?.hourly,
     leader: rollup.v1?.leader,
     marketCountsByDay: rollup.v3?.marketCountsByDay ?? [],
+    rollupMode: rollup.v3?.rollupMode ?? "unknown",
+    rowLimits: rollup.v3?.rowLimits ?? null,
     stability: rollup.v2?.stability,
   };
 }

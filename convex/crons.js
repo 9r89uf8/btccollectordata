@@ -33,13 +33,6 @@ crons.interval(
 );
 
 crons.interval(
-  "refresh btc 5m analytics dashboard rollup",
-  { minutes: 360 },
-  internal.internal.analyticsRollups.refreshNow,
-  {},
-);
-
-crons.interval(
   "repair stale active markets and missing summaries",
   { minutes: 60 },
   internal.internal.repair.reconcileStaleActiveMarketsAndMissingSummaries,

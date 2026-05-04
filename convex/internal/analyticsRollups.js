@@ -5,20 +5,11 @@ import {
   internalQuery,
 } from "../_generated/server";
 import { v } from "convex/values";
-import { ANALYTICS_VERSION } from "../../packages/shared/src/marketAnalytics.js";
-import {
-  DASHBOARD_ROLLUP_KEY,
-  DASHBOARD_ROLLUP_VERSION,
-  TARGET_PATH_RISK_CHECKPOINTS,
-  buildAnalyticsDashboard,
-} from "../../packages/shared/src/analyticsDashboard.js";
-import { STABILITY_ANALYTICS_VERSION } from "../../packages/shared/src/marketStabilityAnalytics.js";
+import { TARGET_PATH_RISK_CHECKPOINTS } from "../../packages/shared/src/analyticsDashboard.js";
 
 const TARGET_PATH_RISK_CHECKPOINT_SET = new Set(TARGET_PATH_RISK_CHECKPOINTS);
 const EXPECTED_BTC_5M_MARKETS_PER_DAY = 288;
-const MARKET_COUNT_ROLLUP_DAYS = 14;
-const MAX_ANALYTICS_ROLLUP_ROWS = 2500;
-const MAX_STABILITY_ROLLUP_ROWS = 2500;
+const rollupModeValue = v.union(v.literal("recent"), v.literal("full"));
 
 async function getRollupByKey(ctx, key) {
   return await ctx.db
@@ -268,44 +259,15 @@ export const listMarketCountsByDay = internalQuery({
   },
 });
 
-function buildRollupFromRows({
-  analyticsRows,
-  marketCountsByDay,
-  nowTs,
-  stabilityRows,
-}) {
-  const dashboard = buildAnalyticsDashboard({
-    analyticsRows,
-    computedAt: nowTs,
-    stabilityRows,
-  });
-  return {
-    analyticsVersion: ANALYTICS_VERSION,
-    computedAt: dashboard.computedAt,
-    key: DASHBOARD_ROLLUP_KEY,
-    rollupVersion: DASHBOARD_ROLLUP_VERSION,
-    stabilityAnalyticsVersion: STABILITY_ANALYTICS_VERSION,
-    v1: {
-      health: dashboard.health,
-      leader: dashboard.leader,
-    },
-    v2: {
-      stability: dashboard.stability,
-    },
-    v3: {
-      hourly: dashboard.hourly,
-      marketCountsByDay,
-    },
-  };
-}
-
 export async function writeAnalyticsDashboardRollup(ctx, rollup) {
   const upsert = await upsertRollup(ctx, rollup);
 
   return {
     analyticsRows: rollup.v1?.health?.cohortFunnel?.analyticsRows ?? null,
     computedAt: rollup.computedAt,
+    mode: rollup.v3?.rollupMode ?? null,
     rollupVersion: rollup.rollupVersion,
+    rowLimits: rollup.v3?.rowLimits ?? null,
     stabilityRows: rollup.v1?.health?.cohortFunnel?.stabilityRows ?? null,
     status: upsert.status,
   };
@@ -320,65 +282,26 @@ export const writeRollup = internalMutation({
   },
 });
 
-async function collectRows(ctx, functionRef, { maxRows, pageLimit }) {
-  const rows = [];
-  let beforeWindowEndTs = undefined;
-
-  for (
-    let pageIndex = 0;
-    pageIndex < 100 && rows.length < maxRows;
-    pageIndex += 1
-  ) {
-    const page = await ctx.runQuery(functionRef, {
-      beforeWindowEndTs,
-      limit: Math.min(pageLimit, maxRows - rows.length),
-    });
-
-    rows.push(...page.rows);
-
-    if (page.done || !page.nextBeforeWindowEndTs) {
-      break;
-    }
-
-    beforeWindowEndTs = page.nextBeforeWindowEndTs;
-  }
-
-  return rows;
-}
-
 export const refreshNow = internalAction({
-  args: {},
-  handler: async (ctx) => {
-    const nowTs = Date.now();
-    const [analyticsRows, stabilityRows, marketCountsByDay] = await Promise.all([
-      collectRows(ctx, internal.internal.analyticsRollups.listAnalyticsPage, {
-        maxRows: MAX_ANALYTICS_ROLLUP_ROWS,
-        pageLimit: 500,
-      }),
-      collectRows(ctx, internal.internal.analyticsRollups.listStabilityPage, {
-        maxRows: MAX_STABILITY_ROLLUP_ROWS,
-        pageLimit: 150,
-      }),
-      ctx.runQuery(internal.internal.analyticsRollups.listMarketCountsByDay, {
-        limitDays: MARKET_COUNT_ROLLUP_DAYS,
-      }),
-    ]);
-    const rollup = buildRollupFromRows({
-      analyticsRows,
-      marketCountsByDay,
-      nowTs,
-      stabilityRows,
-    });
-
-    return await ctx.runMutation(internal.internal.analyticsRollups.writeRollup, {
-      rollup,
-    });
+  args: {
+    mode: v.optional(rollupModeValue),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runAction(
+      internal.internal.analyticsRollupRefresh.refreshNow,
+      args.mode ? { mode: args.mode } : {},
+    );
   },
 });
 
 export const refreshNowAction = internalAction({
-  args: {},
-  handler: async (ctx) => {
-    return await ctx.runAction(internal.internal.analyticsRollups.refreshNow, {});
+  args: {
+    mode: v.optional(rollupModeValue),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runAction(
+      internal.internal.analyticsRollups.refreshNow,
+      args.mode ? { mode: args.mode } : {},
+    );
   },
 });

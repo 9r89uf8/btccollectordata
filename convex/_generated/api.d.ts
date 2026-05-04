@@ -14,6 +14,7 @@ import type * as crons from "../crons.js";
 import type * as events from "../events.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
+import type * as internal_analyticsRollupRefresh from "../internal/analyticsRollupRefresh.js";
 import type * as internal_analyticsRollups from "../internal/analyticsRollups.js";
 import type * as internal_btcReferences from "../internal/btcReferences.js";
 import type * as internal_discovery from "../internal/discovery.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   events: typeof events;
   health: typeof health;
   http: typeof http;
+  "internal/analyticsRollupRefresh": typeof internal_analyticsRollupRefresh;
   "internal/analyticsRollups": typeof internal_analyticsRollups;
   "internal/btcReferences": typeof internal_btcReferences;
   "internal/discovery": typeof internal_discovery;
