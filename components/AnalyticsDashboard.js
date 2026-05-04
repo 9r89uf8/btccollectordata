@@ -24,14 +24,6 @@ function bps(value) {
   return Number.isFinite(value) ? `${value.toFixed(2)} bps` : "n/a";
 }
 
-function usd(value) {
-  if (!Number.isFinite(value)) {
-    return "n/a";
-  }
-
-  return value >= 100 ? `$${value.toFixed(0)}` : `$${value.toFixed(2)}`;
-}
-
 function rank(value) {
   return Number.isFinite(value) ? value.toFixed(3) : "n/a";
 }
@@ -275,102 +267,6 @@ function buildLlmChartDataExport(stability, computedAt) {
       },
       prompt:
         "Analyze these BTC 5-minute checkpoint charts. Focus on which signals separate leader win rate after holding checkpoint and distance fixed, where chop and 30s momentum disagree, and which cells are too sparse to trust.",
-    },
-    null,
-    2,
-  );
-}
-
-function compactHourlyCheckpoint(checkpoint) {
-  if (!checkpoint) {
-    return null;
-  }
-
-  return {
-    anyFlipAfterTRate: checkpoint.anyFlipAfterTRate,
-    checkpointSecond: checkpoint.checkpointSecond,
-    colorEligible: checkpoint.colorEligible,
-    flipLossRate: checkpoint.flipLossRate,
-    hidden: checkpoint.hidden,
-    highChopRate: checkpoint.highChopRate,
-    leaderAgeSecondsMedian: checkpoint.leaderAgeSecondsMedian,
-    leaderEligibleN: checkpoint.leaderEligibleN,
-    leaderWinRate: checkpoint.leaderWinRate,
-    medianMaxAdverseDrawdownBps: checkpoint.medianMaxAdverseDrawdownBps,
-    medianPreCrossCountLast60s: checkpoint.medianPreCrossCountLast60s,
-    medianPreNearLineSeconds: checkpoint.medianPreNearLineSeconds,
-    medianPreRange120sBps: checkpoint.medianPreRange120sBps,
-    multiFlipRate: checkpoint.multiFlipRate,
-    N: checkpoint.N,
-    nearLineHeavyRate: checkpoint.nearLineHeavyRate,
-    noDecisionAtCheckpointRate: checkpoint.noDecisionAtCheckpointRate,
-    pathRiskRate: checkpoint.pathRiskRate,
-    p90MaxAdverseDrawdownBps: checkpoint.p90MaxAdverseDrawdownBps,
-    recentLockRate: checkpoint.recentLockRate,
-    riskEligibleN: checkpoint.riskEligibleN,
-    stableLeaderWinRate: checkpoint.stableLeaderWinRate,
-  };
-}
-
-function compactHourlyRow(row) {
-  return {
-    bestCheckpoint: compactHourlyCheckpoint(row.bestCheckpoint),
-    checkpointSummary: compactHourlyCheckpoint(row.checkpointSummary),
-    checkpoints: (row.checkpoints ?? []).map(compactHourlyCheckpoint),
-    chopScore: row.chopScore,
-    colorEligible: row.colorEligible,
-    distanceTaxLabel: row.distanceTaxLabel,
-    downRate: row.downRate,
-    hidden: row.hidden,
-    hourET: row.hourET,
-    hourETLabel: row.hourETLabel,
-    hourUTC: row.hourUTC,
-    medianAbsCloseMoveBps: row.medianAbsCloseMoveBps,
-    medianAbsMoveDollars: row.medianAbsMoveDollars,
-    medianHardFlipCount: row.medianHardFlipCount,
-    medianMaxDistanceBps: row.medianMaxDistanceBps,
-    medianNoiseTouchCount: row.medianNoiseTouchCount,
-    minimumDistanceTaxBuckets: row.minimumDistanceTaxBuckets,
-    moveN: row.moveN,
-    N: row.N,
-    p90AbsCloseMoveBps: row.p90AbsCloseMoveBps,
-    p90AbsMoveDollars: row.p90AbsMoveDollars,
-    reliabilityScore: row.reliabilityScore,
-    sessionET: row.sessionET,
-    sessionETLabel: row.sessionETLabel,
-    shareAbsMoveGte20: row.shareAbsMoveGte20,
-    shareAbsMoveGte50: row.shareAbsMoveGte50,
-    speedScore: row.speedScore,
-    supportLevel: row.supportLevel,
-    upRate: row.upRate,
-  };
-}
-
-function buildHourlyProfileExport(hourly, computedAt) {
-  return JSON.stringify(
-    {
-      charts: {
-        hourlyMarketProfile: {
-          description:
-            "BTC 5-minute resolved-market hourly context by ET hour. Use this as a risk adjustment over checkpoint, distance, and path quality, not as a standalone signal.",
-          rows: (hourly?.rows ?? []).map(compactHourlyRow),
-        },
-      },
-      computedAt,
-      definitions: {
-        metricUnits: {
-          bps: "basis points",
-          dollars: "USD move estimated from priceToBeat and close margin bps",
-          N: "market count",
-          rates: "0 to 1 probabilities",
-        },
-        riskFlags: hourly?.definitions?.riskFlags,
-        scoreMethod: hourly?.definitions?.scoreMethod,
-        support: hourly?.support,
-        targetCheckpoints: hourly?.targetCheckpoints,
-        thresholds: hourly?.thresholds,
-        timeZone: hourly?.definitions?.timeZone,
-      },
     },
     null,
     2,
@@ -720,198 +616,6 @@ function DailyMarketCoverage({ health, rows }) {
           })}
         </div>
       )}
-    </Panel>
-  );
-}
-
-function labelize(value) {
-  if (typeof value !== "string" || value.trim() === "") {
-    return "n/a";
-  }
-
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function badgeTone(value) {
-  if (["fast", "clean", "strong"].includes(value)) {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  }
-
-  if (["slow", "choppy", "weak"].includes(value)) {
-    return "border-rose-200 bg-rose-50 text-rose-800";
-  }
-
-  if (value === "unsupported" || value === "unknown") {
-    return "border-stone-200 bg-stone-50 text-stone-500";
-  }
-
-  return "border-sky-200 bg-sky-50 text-sky-800";
-}
-
-function supportTone(level) {
-  if (level === "strong") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  }
-
-  if (level === "soft") {
-    return "border-sky-200 bg-sky-50 text-sky-800";
-  }
-
-  if (level === "preview") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
-  }
-
-  return "border-stone-200 bg-stone-50 text-stone-500";
-}
-
-function Badge({ tone, value }) {
-  return (
-    <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${tone}`}>
-      {value}
-    </span>
-  );
-}
-
-function HourlyMarketProfile({ computedAt, hourly }) {
-  const [copyStatus, setCopyStatus] = useState("");
-  const rows = Array.isArray(hourly?.rows) ? hourly.rows : [];
-  const hasMarkets = rows.some((row) => row.N > 0);
-
-  async function copyHourlyProfile() {
-    try {
-      await copyText(buildHourlyProfileExport(hourly, computedAt));
-      setCopyStatus("Copied hourly profile");
-      window.setTimeout(() => setCopyStatus(""), 2500);
-    } catch {
-      setCopyStatus("Copy failed");
-    }
-  }
-
-  return (
-    <Panel label="Hourly context" title="Hourly market profile">
-      <p className="mb-4 text-sm leading-6 text-stone-700">
-        ET hour is treated as a context layer over the checkpoint and distance
-        model. Unsupported hours are shown for coverage but do not emit a rule.
-      </p>
-      {hasMarkets ? (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={copyHourlyProfile}
-            className="rounded-full border border-black/10 bg-stone-950 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-800"
-          >
-            Copy all hourly profile
-          </button>
-          {copyStatus ? (
-            <span className="text-xs font-medium text-stone-500">
-              {copyStatus}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {!hasMarkets ? (
-        <p className="text-sm text-stone-500">No hourly market data yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1240px] text-left">
-            <thead>
-              <tr>
-                <th className={th}>Hour ET</th>
-                <th className={`${th} text-right`}>N</th>
-                <th className={th}>Support</th>
-                <th className={th}>Speed</th>
-                <th className={th}>Chop</th>
-                <th className={th}>Reliability</th>
-                <th className={`${th} text-right`}>Median move</th>
-                <th className={`${th} text-right`}>Share &gt;= $50</th>
-                <th className={`${th} text-right`}>Recent lock</th>
-                <th className={`${th} text-right`}>Multi-flip</th>
-                <th className={`${th} text-right`}>Near-line</th>
-                <th className={`${th} text-right`}>Path risk</th>
-                <th className={`${th} text-right`}>Flip loss</th>
-                <th className={`${th} text-right`}>Best T</th>
-                <th className={`${th} text-right`}>Distance tax</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {rows.map((row) => {
-                const summary = row.checkpointSummary ?? {};
-
-                return (
-                  <tr
-                    key={row.hourET}
-                    className={row.hidden ? "text-stone-400" : undefined}
-                  >
-                    <td className={`${td} font-medium text-stone-950`}>
-                      {row.hourETLabel}
-                      <span className="block text-xs font-normal text-stone-500">
-                        {row.hourUTC === null ? "UTC n/a" : `${row.hourUTC}:00 UTC`} /{" "}
-                        {row.sessionETLabel}
-                      </span>
-                    </td>
-                    <td className={`${td} text-right`}>{n(row.N)}</td>
-                    <td className={td}>
-                      <Badge
-                        tone={supportTone(row.supportLevel)}
-                        value={labelize(row.supportLevel)}
-                      />
-                    </td>
-                    <td className={td}>
-                      <Badge tone={badgeTone(row.speedScore)} value={labelize(row.speedScore)} />
-                    </td>
-                    <td className={td}>
-                      <Badge tone={badgeTone(row.chopScore)} value={labelize(row.chopScore)} />
-                    </td>
-                    <td className={td}>
-                      <Badge
-                        tone={badgeTone(row.reliabilityScore)}
-                        value={labelize(row.reliabilityScore)}
-                      />
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {usd(row.medianAbsMoveDollars)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(row.shareAbsMoveGte50)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(summary.recentLockRate)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(summary.multiFlipRate)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(summary.nearLineHeavyRate)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(summary.pathRiskRate)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {pct(summary.flipLossRate)}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {row.bestCheckpoint
-                        ? `T+${row.bestCheckpoint.checkpointSecond}s`
-                        : "n/a"}
-                    </td>
-                    <td className={`${td} text-right`}>
-                      {row.distanceTaxLabel ?? "n/a"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <p className="mt-3 text-xs text-stone-500">
-        Supported at N &gt;= {n(hourly?.support?.floor)}, colored at N &gt;={" "}
-        {n(hourly?.support?.colorFloor)}, strong at N &gt;={" "}
-        {n(hourly?.support?.strongFloor)}.
-      </p>
     </Panel>
   );
 }
@@ -1556,7 +1260,7 @@ export default function AnalyticsDashboard() {
     return <Loading />;
   }
 
-  const { computedAt, health, hourly, marketCountsByDay, stability } = dashboard;
+  const { computedAt, health, marketCountsByDay, stability } = dashboard;
 
   if (!stability?.cleanCount) {
     return (
@@ -1572,7 +1276,6 @@ export default function AnalyticsDashboard() {
     <div className="space-y-5">
       <DatasetEligibility health={health} stability={stability} />
       <DailyMarketCoverage health={health} rows={marketCountsByDay} />
-      <HourlyMarketProfile computedAt={computedAt} hourly={hourly} />
       <Leader stability={stability} />
       <StabilitySection computedAt={computedAt} stability={stability} />
       <p className="text-right text-xs text-stone-500">

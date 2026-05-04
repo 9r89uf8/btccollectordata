@@ -66,7 +66,6 @@ function buildRollupFromRows({
       stability: dashboard.stability,
     },
     v3: {
-      hourly: dashboard.hourly,
       marketCountsByDay,
       rollupMode: mode,
       rowLimits,

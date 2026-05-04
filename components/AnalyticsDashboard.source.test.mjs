@@ -25,9 +25,4 @@ test("AnalyticsDashboard includes diagnostic metric and chop-threshold labels", 
   assert.ok(source.includes("p90 dd"));
   assert.ok(source.includes("Stored markets by day"));
   assert.ok(source.includes("marketCountsByDay"));
-  assert.ok(source.includes("Hourly market profile"));
-  assert.ok(source.includes("Recent lock"));
-  assert.ok(source.includes("Distance tax"));
-  assert.ok(source.includes("buildHourlyProfileExport"));
-  assert.ok(source.includes("Copy all hourly profile"));
 });
