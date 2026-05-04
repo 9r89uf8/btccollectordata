@@ -145,6 +145,7 @@ export default function ReplayLineChart({
   formatTimeValue = formatEtTime,
   markers = [],
   minSvgWidth = null,
+  referenceLines = [],
   sampleCadenceMs = 1000,
   secondaryYDomain = null,
   secondaryYTicks = [],
@@ -208,6 +209,23 @@ export default function ReplayLineChart({
       ...marker,
       x: getX(marker.secondBucket),
     }));
+  const visibleReferenceLines = referenceLines
+    .filter((line) => Number.isFinite(line?.value))
+    .map((line) => {
+      const axis = getSeriesAxis(line, hasSecondaryAxis);
+      const domainMinimum = axis === "secondary" ? secondaryDomainMin : domainMin;
+      const domainMaximum = axis === "secondary" ? secondaryDomainMax : domainMax;
+
+      if (line.value < domainMinimum || line.value > domainMaximum) {
+        return null;
+      }
+
+      return {
+        ...line,
+        y: axis === "secondary" ? getSecondaryY(line.value) : getY(line.value),
+      };
+    })
+    .filter(Boolean);
   const qualityBarY = top + plotHeight + 14;
 
   return (
@@ -313,6 +331,32 @@ export default function ReplayLineChart({
                 </g>
               ))
             : null}
+
+          {visibleReferenceLines.map((line) => (
+            <g key={line.key ?? `${line.label}-${line.value}`}>
+              <line
+                x1={left}
+                x2={width - right}
+                y1={line.y}
+                y2={line.y}
+                stroke={line.color ?? "rgba(15, 23, 42, 0.55)"}
+                strokeDasharray={line.dashArray ?? "5 5"}
+                strokeWidth="2"
+              />
+              {line.label ? (
+                <text
+                  x={width - right - 8}
+                  y={Math.max(top + 12, line.y - 6)}
+                  fill={line.color ?? "#0f172a"}
+                  fontSize="11"
+                  fontWeight="700"
+                  textAnchor="end"
+                >
+                  {line.label}
+                </text>
+              ) : null}
+            </g>
+          ))}
 
           {series.map((item) => {
             const yAccessor =

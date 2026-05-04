@@ -215,9 +215,11 @@ function buildFinalWindowSecondRows(timeline, market) {
   return rows;
 }
 
-function getBtcDomain(timeline, keys = ["btcChainlink"]) {
-  const btcValues = timeline
-    .flatMap((item) => keys.map((key) => item?.[key]))
+function getBtcDomain(timeline, keys = ["btcChainlink"], extraValues = []) {
+  const btcValues = [
+    ...timeline.flatMap((item) => keys.map((key) => item?.[key])),
+    ...extraValues,
+  ]
     .filter((value) => Number.isFinite(value));
 
   if (btcValues.length === 0) {
@@ -569,7 +571,9 @@ export default function MarketDetailScaffold({ slug }) {
   const currentSnapshot =
     latestSnapshot ?? [...timeline].reverse().find((item) => !item.missing) ?? null;
   const probabilityTicks = [0, 0.25, 0.5, 0.75, 1];
-  const btcDomain = getBtcDomain(timeline);
+  const displayedPriceToBeat =
+    market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
+  const btcDomain = getBtcDomain(timeline, ["btcChainlink"], [displayedPriceToBeat]);
   const btcTicks = getBtcTicks(btcDomain);
   const timelineRows = [...timeline].reverse();
   const finalWindowSecondRows = buildFinalWindowSecondRows(timeline, market);
@@ -595,8 +599,6 @@ export default function MarketDetailScaffold({ slug }) {
         }
       : null,
   ].filter(Boolean);
-  const displayedPriceToBeat =
-    market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
   const displayedCloseReference =
     market.closeReferencePriceOfficial ?? market.closeReferencePriceDerived ?? null;
   const activeReferenceFallback = market.active ? "not published yet" : "missing";
@@ -881,7 +883,7 @@ export default function MarketDetailScaffold({ slug }) {
       <ReplayLineChart
         eyebrow="Replay"
         title="Displayed probability over time"
-        description={`Lines break when an expected replay sample bucket is missing. ${market.outcomeLabels.upLabel} and ${market.outcomeLabels.downLabel} use the left probability axis, while Chainlink BTC overlays on the right USD axis. The strip below shows whether each loaded ${formatSamplingCadence(
+        description={`Lines break when an expected replay sample bucket is missing. ${market.outcomeLabels.upLabel} and ${market.outcomeLabels.downLabel} use the left probability axis, while Chainlink BTC and the price-to-beat reference use the right USD axis. The strip below shows whether each loaded ${formatSamplingCadence(
           cadenceMs,
         )} bucket was good, stale, gap-filled, or missing.`}
         emptyMessage="No snapshot history has been written for this market yet."
@@ -889,6 +891,18 @@ export default function MarketDetailScaffold({ slug }) {
         formatSecondaryAxisValue={formatBtcAxisValue}
         formatTimeValue={formatEtTimeWithSeconds}
         markers={probabilityMarkers}
+        referenceLines={[
+          Number.isFinite(displayedPriceToBeat)
+            ? {
+                axis: "secondary",
+                color: "#d97706",
+                dashArray: "7 5",
+                key: "price-to-beat",
+                label: `Price to beat ${formatBtcUsd(displayedPriceToBeat)}`,
+                value: displayedPriceToBeat,
+              }
+            : null,
+        ].filter(Boolean)}
         sampleCadenceMs={cadenceMs}
         secondaryYDomain={btcDomain}
         secondaryYTicks={btcTicks}
