@@ -13,6 +13,7 @@ import {
 import {
   formatBtcReferenceValue,
   formatBtcUsd,
+  formatElapsedMarketTime,
   formatEtDateTime,
   formatEtRange,
   formatEtTimeWithSeconds,
@@ -141,7 +142,56 @@ function getMarketWindowSeconds(market) {
   return Math.round((market.windowEndTs - market.windowStartTs) / 1000);
 }
 
-function getFinalWindowRows(timeline, market) {
+function getBucketPhase(secondBucket, market) {
+  if (secondBucket < market.windowStartTs) {
+    return "pre";
+  }
+
+  if (secondBucket >= market.windowEndTs) {
+    return "post";
+  }
+
+  return "live";
+}
+
+function buildMissingFinalWindowEntry(market, secondBucket) {
+  return {
+    _id: `final-missing-${market.slug}-${secondBucket}`,
+    btcBinance: null,
+    btcChainlink: null,
+    displayRuleUsed: "unknown",
+    downAsk: null,
+    downBid: null,
+    downDepthAskTop: null,
+    downDepthBidTop: null,
+    downDisplayed: null,
+    downLast: null,
+    downMid: null,
+    downSpread: null,
+    marketId: market.marketId,
+    marketImbalance: null,
+    marketSlug: market.slug,
+    missing: true,
+    phase: getBucketPhase(secondBucket, market),
+    secondBucket,
+    secondsFromWindowStart: Math.round(
+      (secondBucket - market.windowStartTs) / 1000,
+    ),
+    sourceQuality: "missing",
+    ts: secondBucket,
+    upAsk: null,
+    upBid: null,
+    upDepthAskTop: null,
+    upDepthBidTop: null,
+    upDisplayed: null,
+    upLast: null,
+    upMid: null,
+    upSpread: null,
+    writtenAt: null,
+  };
+}
+
+function buildFinalWindowSecondRows(timeline, market) {
   const windowSeconds = getMarketWindowSeconds(market);
 
   if (!Number.isFinite(windowSeconds)) {
@@ -149,12 +199,20 @@ function getFinalWindowRows(timeline, market) {
   }
 
   const startSecond = Math.max(0, windowSeconds - 10);
-
-  return timeline.filter(
-    (snapshot) =>
-      snapshot.secondsFromWindowStart >= startSecond &&
-      snapshot.secondsFromWindowStart <= windowSeconds,
+  const rowsByBucket = new Map(
+    timeline.map((snapshot) => [snapshot.secondBucket, snapshot]),
   );
+  const rows = [];
+
+  for (let second = startSecond; second <= windowSeconds; second += 1) {
+    const secondBucket = market.windowStartTs + second * 1000;
+    rows.push(
+      rowsByBucket.get(secondBucket) ??
+        buildMissingFinalWindowEntry(market, secondBucket),
+    );
+  }
+
+  return rows;
 }
 
 function getBtcDomain(timeline) {
@@ -246,6 +304,7 @@ function FinalTenSecondTape({ market, rows }) {
               <tr>
                 <th className="px-4 py-3 font-semibold">Bucket ET</th>
                 <th className="px-4 py-3 font-semibold">Captured ET</th>
+                <th className="px-4 py-3 font-semibold">Elapsed</th>
                 <th className="px-4 py-3 font-semibold">Second</th>
                 <th className="px-4 py-3 font-semibold">Up</th>
                 <th className="px-4 py-3 font-semibold">Down</th>
@@ -269,6 +328,9 @@ function FinalTenSecondTape({ market, rows }) {
                     {snapshot.missing
                       ? "missing"
                       : formatEtTimeWithSeconds(snapshot.ts)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-medium text-stone-950">
+                    {formatElapsedMarketTime(snapshot.secondsFromWindowStart)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {formatRelativeSecond(snapshot.secondsFromWindowStart)}
@@ -297,6 +359,48 @@ function FinalTenSecondTape({ market, rows }) {
         </div>
       )}
     </article>
+  );
+}
+
+function FinalTenSecondChart({ market, rows }) {
+  const windowSeconds = getMarketWindowSeconds(market);
+
+  return (
+    <ReplayLineChart
+      chartHeight={390}
+      chartWidth={1180}
+      eyebrow="Final 10 seconds"
+      title="Expanded displayed probability"
+      description={`${formatElapsedMarketTime(
+        Math.max(0, (windowSeconds ?? 300) - 10),
+      )} to ${formatElapsedMarketTime(windowSeconds ?? 300)}`}
+      emptyMessage="Final-window replay rows are pending."
+      formatAxisValue={(tick) => formatProbability(tick)}
+      formatPrimaryXValue={(entry) =>
+        formatElapsedMarketTime(entry?.secondsFromWindowStart)
+      }
+      formatSecondaryXValue={(entry) =>
+        formatEtTimeWithSeconds(entry?.secondBucket ?? entry?.ts)
+      }
+      minSvgWidth={1120}
+      sampleCadenceMs={1000}
+      series={[
+        {
+          color: "#0f766e",
+          key: "upDisplayed",
+          label: market.outcomeLabels.upLabel,
+        },
+        {
+          color: "#be185d",
+          key: "downDisplayed",
+          label: market.outcomeLabels.downLabel,
+        },
+      ]}
+      timeline={rows}
+      xTickMode="all"
+      yDomain={[0, 1]}
+      yTicks={[0, 0.25, 0.5, 0.75, 1]}
+    />
   );
 }
 
@@ -366,7 +470,7 @@ export default function MarketDetailScaffold({ slug }) {
     btcDomain[1],
   ];
   const timelineRows = [...timeline].reverse();
-  const finalWindowRows = getFinalWindowRows(timeline, market);
+  const finalWindowSecondRows = buildFinalWindowSecondRows(timeline, market);
   const liveWindowSeconds = coverage.liveObservedCount + coverage.liveMissingCount;
   const finalWindowStartTs = Number.isFinite(market.windowEndTs)
     ? market.windowEndTs - 10 * 1000
@@ -721,7 +825,9 @@ export default function MarketDetailScaffold({ slug }) {
         yTicks={probabilityTicks}
       />
 
-      <FinalTenSecondTape market={market} rows={finalWindowRows} />
+      <FinalTenSecondChart market={market} rows={finalWindowSecondRows} />
+
+      <FinalTenSecondTape market={market} rows={finalWindowSecondRows} />
 
       <ReplayLineChart
         eyebrow="Reference BTC"

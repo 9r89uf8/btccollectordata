@@ -20,9 +20,13 @@ const QUALITY_COLORS = {
   stale_btc: "#fb7185",
 };
 
-function buildTickIndices(length) {
+function buildTickIndices(length, tickMode = "auto") {
   if (length <= 1) {
     return [0];
+  }
+
+  if (tickMode === "all") {
+    return Array.from({ length }, (_, index) => index);
   }
 
   const indices = new Set();
@@ -128,19 +132,26 @@ function getSeriesAxis(series, hasSecondaryAxis) {
 }
 
 export default function ReplayLineChart({
+  chartHeight = 320,
+  chartWidth = 920,
   description,
   emptyMessage,
   eyebrow,
   formatAxisValue,
+  formatPrimaryXValue = (entry) =>
+    formatRelativeSecond(entry?.secondsFromWindowStart),
   formatSecondaryAxisValue = null,
+  formatSecondaryXValue = (entry) => formatTimeValue(entry?.secondBucket ?? entry?.ts),
   formatTimeValue = formatEtTime,
   markers = [],
+  minSvgWidth = null,
   sampleCadenceMs = 1000,
   secondaryYDomain = null,
   secondaryYTicks = [],
   series,
   timeline,
   title,
+  xTickMode = "auto",
   yDomain,
   yTicks,
 }) {
@@ -158,12 +169,12 @@ export default function ReplayLineChart({
     );
   }
 
-  const width = 920;
-  const height = 320;
+  const width = chartWidth;
+  const height = chartHeight;
   const left = 58;
   const right = formatSecondaryAxisValue && secondaryYDomain ? 58 : 18;
   const top = 18;
-  const bottom = 70;
+  const bottom = xTickMode === "all" ? 86 : 70;
   const qualityHeight = 14;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom - qualityHeight;
@@ -173,7 +184,7 @@ export default function ReplayLineChart({
     ? normalizeDomain(secondaryYDomain)
     : [0, 1];
   const [bucketMin, bucketMax] = getBucketDomain(timeline, sampleCadenceMs);
-  const tickIndices = buildTickIndices(timeline.length);
+  const tickIndices = buildTickIndices(timeline.length, xTickMode);
   const getX = (bucket) =>
     left +
     ((bucket - bucketMin) / Math.max(bucketMax - bucketMin, sampleCadenceMs || 1)) * plotWidth;
@@ -229,8 +240,12 @@ export default function ReplayLineChart({
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-[1.3rem] border border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,244,241,0.96))] p-4">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
+      <div className="mt-6 overflow-x-auto rounded-[1.3rem] border border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,244,241,0.96))] p-4">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full"
+          style={minSvgWidth ? { minWidth: `${minSvgWidth}px` } : undefined}
+        >
           {phaseBands.map((band) => (
             <rect
               key={band.key}
@@ -378,7 +393,7 @@ export default function ReplayLineChart({
                 textAnchor="middle"
               >
                 <tspan x={getX(timeline[index]?.secondBucket ?? bucketMin)} dy="0">
-                  {formatRelativeSecond(timeline[index]?.secondsFromWindowStart)}
+                  {formatPrimaryXValue(timeline[index])}
                 </tspan>
                 <tspan
                   x={getX(timeline[index]?.secondBucket ?? bucketMin)}
@@ -386,7 +401,7 @@ export default function ReplayLineChart({
                   fill="#78716c"
                   fontSize="10"
                 >
-                  {formatTimeValue(timeline[index]?.ts)}
+                  {formatSecondaryXValue(timeline[index])}
                 </tspan>
               </text>
             </g>

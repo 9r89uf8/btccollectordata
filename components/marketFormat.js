@@ -54,6 +54,20 @@ export function formatEtTimeWithSeconds(ts) {
   return `${ET_TIME_WITH_SECONDS_FORMATTER.format(new Date(ts))} ET`;
 }
 
+export function formatElapsedMarketTime(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "pending";
+  }
+
+  const roundedSeconds = Math.round(seconds);
+  const sign = roundedSeconds < 0 ? "-" : "";
+  const absoluteSeconds = Math.abs(roundedSeconds);
+  const minutes = Math.floor(absoluteSeconds / 60);
+  const remainderSeconds = absoluteSeconds % 60;
+
+  return `${sign}${minutes}:${String(remainderSeconds).padStart(2, "0")}`;
+}
+
 export function formatProbability(value) {
   if (value == null) {
     return "pending";
