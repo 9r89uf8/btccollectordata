@@ -215,10 +215,10 @@ function buildFinalWindowSecondRows(timeline, market) {
   return rows;
 }
 
-function getBtcDomain(timeline) {
+function getBtcDomain(timeline, keys = ["btcChainlink"]) {
   const btcValues = timeline
-    .map((item) => item.btcChainlink)
-    .filter((value) => value != null);
+    .flatMap((item) => keys.map((key) => item?.[key]))
+    .filter((value) => Number.isFinite(value));
 
   if (btcValues.length === 0) {
     return [0, 1];
@@ -234,6 +234,29 @@ function getBtcDomain(timeline) {
 
   const padding = Math.max((max - min) * 0.08, 8);
   return [min - padding, max + padding];
+}
+
+function hasBtcValues(timeline, keys = ["btcChainlink"]) {
+  return timeline.some((item) =>
+    keys.some((key) => Number.isFinite(item?.[key])),
+  );
+}
+
+function getBtcTicks(domain) {
+  return [
+    domain[0],
+    domain[0] + (domain[1] - domain[0]) / 3,
+    domain[0] + ((domain[1] - domain[0]) * 2) / 3,
+    domain[1],
+  ];
+}
+
+function formatBtcAxisValue(tick) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 0,
+    style: "currency",
+  }).format(tick);
 }
 
 function MarketPagerButton({ direction, market }) {
@@ -364,21 +387,28 @@ function FinalTenSecondTape({ market, rows }) {
 
 function FinalTenSecondChart({ market, rows }) {
   const windowSeconds = getMarketWindowSeconds(market);
+  const finalBtcKeys = ["btcChainlink", "btcBinance"];
+  const finalBtcDomain = getBtcDomain(rows, finalBtcKeys);
+  const finalBtcTicks = getBtcTicks(finalBtcDomain);
+  const showBtcAxis = hasBtcValues(rows, finalBtcKeys);
 
   return (
     <ReplayLineChart
-      chartHeight={390}
+      chartHeight={420}
       chartWidth={1180}
       eyebrow="Final 10 seconds"
       title="Expanded displayed probability"
       description={`${formatElapsedMarketTime(
         Math.max(0, (windowSeconds ?? 300) - 10),
-      )} to ${formatElapsedMarketTime(windowSeconds ?? 300)}`}
+      )} to ${formatElapsedMarketTime(
+        windowSeconds ?? 300,
+      )} with Chainlink and Binance BTC.`}
       emptyMessage="Final-window replay rows are pending."
       formatAxisValue={(tick) => formatProbability(tick)}
       formatPrimaryXValue={(entry) =>
         formatElapsedMarketTime(entry?.secondsFromWindowStart)
       }
+      formatSecondaryAxisValue={showBtcAxis ? formatBtcAxisValue : null}
       formatSecondaryXValue={(entry) =>
         formatEtTimeWithSeconds(entry?.secondBucket ?? entry?.ts)
       }
@@ -395,7 +425,23 @@ function FinalTenSecondChart({ market, rows }) {
           key: "downDisplayed",
           label: market.outcomeLabels.downLabel,
         },
+        {
+          axis: "secondary",
+          color: "#1d4ed8",
+          dashArray: "8 6",
+          key: "btcChainlink",
+          label: "Chainlink BTC",
+        },
+        {
+          axis: "secondary",
+          color: "#ea580c",
+          dashArray: "3 5",
+          key: "btcBinance",
+          label: "Binance BTC",
+        },
       ]}
+      secondaryYDomain={showBtcAxis ? finalBtcDomain : null}
+      secondaryYTicks={showBtcAxis ? finalBtcTicks : []}
       timeline={rows}
       xTickMode="all"
       yDomain={[0, 1]}
@@ -463,12 +509,7 @@ export default function MarketDetailScaffold({ slug }) {
     latestSnapshot ?? [...timeline].reverse().find((item) => !item.missing) ?? null;
   const probabilityTicks = [0, 0.25, 0.5, 0.75, 1];
   const btcDomain = getBtcDomain(timeline);
-  const btcTicks = [
-    btcDomain[0],
-    btcDomain[0] + (btcDomain[1] - btcDomain[0]) / 3,
-    btcDomain[0] + ((btcDomain[1] - btcDomain[0]) * 2) / 3,
-    btcDomain[1],
-  ];
+  const btcTicks = getBtcTicks(btcDomain);
   const timelineRows = [...timeline].reverse();
   const finalWindowSecondRows = buildFinalWindowSecondRows(timeline, market);
   const liveWindowSeconds = coverage.liveObservedCount + coverage.liveMissingCount;
@@ -791,11 +832,7 @@ export default function MarketDetailScaffold({ slug }) {
         )} bucket was good, stale, gap-filled, or missing.`}
         emptyMessage="No snapshot history has been written for this market yet."
         formatAxisValue={(tick) => formatProbability(tick)}
-        formatSecondaryAxisValue={(tick) =>
-          new Intl.NumberFormat("en-US", {
-            maximumFractionDigits: 0,
-          }).format(tick)
-        }
+        formatSecondaryAxisValue={formatBtcAxisValue}
         formatTimeValue={formatEtTimeWithSeconds}
         markers={probabilityMarkers}
         sampleCadenceMs={cadenceMs}
@@ -836,11 +873,7 @@ export default function MarketDetailScaffold({ slug }) {
           cadenceMs,
         )} replay buckets as the displayed-probability chart so the market and BTC reference can be read together.`}
         emptyMessage="No BTC-linked snapshots have been written for this market yet."
-        formatAxisValue={(tick) =>
-          new Intl.NumberFormat("en-US", {
-            maximumFractionDigits: 0,
-          }).format(tick)
-        }
+        formatAxisValue={formatBtcAxisValue}
         formatTimeValue={formatEtTimeWithSeconds}
         sampleCadenceMs={cadenceMs}
         series={[
