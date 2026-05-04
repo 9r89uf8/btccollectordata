@@ -15,6 +15,7 @@ import {
   formatBtcUsd,
   formatEtDateTime,
   formatEtRange,
+  formatEtTimeWithSeconds,
   formatProbability,
   formatRelativeSecond,
   formatSnapshotQualityLabel,
@@ -129,6 +130,33 @@ function formatCrossingSecond(value) {
   return formatRelativeSecond(value);
 }
 
+function getMarketWindowSeconds(market) {
+  if (
+    !Number.isFinite(market?.windowStartTs) ||
+    !Number.isFinite(market?.windowEndTs)
+  ) {
+    return null;
+  }
+
+  return Math.round((market.windowEndTs - market.windowStartTs) / 1000);
+}
+
+function getFinalWindowRows(timeline, market) {
+  const windowSeconds = getMarketWindowSeconds(market);
+
+  if (!Number.isFinite(windowSeconds)) {
+    return [];
+  }
+
+  const startSecond = Math.max(0, windowSeconds - 10);
+
+  return timeline.filter(
+    (snapshot) =>
+      snapshot.secondsFromWindowStart >= startSecond &&
+      snapshot.secondsFromWindowStart <= windowSeconds,
+  );
+}
+
 function getBtcDomain(timeline) {
   const btcValues = timeline
     .map((item) => item.btcChainlink)
@@ -178,6 +206,97 @@ function MarketPagerButton({ direction, market }) {
       </p>
       <p className="mt-1 text-xs leading-6 text-stone-600">{market.slug}</p>
     </Link>
+  );
+}
+
+function FinalTenSecondTape({ market, rows }) {
+  const windowSeconds = getMarketWindowSeconds(market);
+  const startSecond = Number.isFinite(windowSeconds)
+    ? Math.max(0, windowSeconds - 10)
+    : null;
+
+  return (
+    <article className="rounded-[1.45rem] border border-black/10 bg-white/85 p-6 shadow-[0_14px_40px_rgba(30,30,30,0.05)]">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">
+            Final 10 seconds
+          </p>
+          <h3 className="mt-3 text-xl font-semibold tracking-[-0.04em] text-stone-950">
+            Displayed probability tape
+          </h3>
+        </div>
+        <p className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">
+          {startSecond == null
+            ? "window pending"
+            : `${formatRelativeSecond(startSecond)} to ${formatRelativeSecond(
+                windowSeconds,
+              )}`}
+        </p>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="mt-4 text-sm leading-7 text-stone-700">
+          Final-window replay rows are pending.
+        </p>
+      ) : (
+        <div className="mt-5 overflow-x-auto rounded-[1.1rem] border border-black/10">
+          <table className="min-w-full text-left text-sm text-stone-700">
+            <thead className="bg-stone-950 text-[11px] uppercase tracking-[0.16em] text-stone-200">
+              <tr>
+                <th className="px-4 py-3 font-semibold">Bucket ET</th>
+                <th className="px-4 py-3 font-semibold">Captured ET</th>
+                <th className="px-4 py-3 font-semibold">Second</th>
+                <th className="px-4 py-3 font-semibold">Up</th>
+                <th className="px-4 py-3 font-semibold">Down</th>
+                <th className="px-4 py-3 font-semibold">BTC</th>
+                <th className="px-4 py-3 font-semibold">Rule</th>
+                <th className="px-4 py-3 font-semibold">Quality</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((snapshot) => (
+                <tr
+                  key={snapshot._id}
+                  className={`border-t border-stone-200/80 ${
+                    snapshot.missing ? "bg-rose-50/55" : "bg-white"
+                  }`}
+                >
+                  <td className="whitespace-nowrap px-4 py-3 font-medium text-stone-950">
+                    {formatEtTimeWithSeconds(snapshot.secondBucket)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {snapshot.missing
+                      ? "missing"
+                      : formatEtTimeWithSeconds(snapshot.ts)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {formatRelativeSecond(snapshot.secondsFromWindowStart)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {formatProbability(snapshot.upDisplayed)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {formatProbability(snapshot.downDisplayed)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {formatBtcUsd(snapshot.btcChainlink)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {formatSnapshotQualityLabel(snapshot.displayRuleUsed)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <Pill tone={getSnapshotQualityTone(snapshot.sourceQuality)}>
+                      {formatSnapshotQualityLabel(snapshot.sourceQuality)}
+                    </Pill>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -247,7 +366,29 @@ export default function MarketDetailScaffold({ slug }) {
     btcDomain[1],
   ];
   const timelineRows = [...timeline].reverse();
+  const finalWindowRows = getFinalWindowRows(timeline, market);
   const liveWindowSeconds = coverage.liveObservedCount + coverage.liveMissingCount;
+  const finalWindowStartTs = Number.isFinite(market.windowEndTs)
+    ? market.windowEndTs - 10 * 1000
+    : null;
+  const probabilityMarkers = [
+    Number.isFinite(finalWindowStartTs)
+      ? {
+          color: "#d97706",
+          key: "final-window-start",
+          label: "Final 10s",
+          secondBucket: finalWindowStartTs,
+        }
+      : null,
+    Number.isFinite(market.windowEndTs)
+      ? {
+          color: "#1f2937",
+          key: "market-close",
+          label: "Close",
+          secondBucket: market.windowEndTs,
+        }
+      : null,
+  ].filter(Boolean);
   const displayedPriceToBeat =
     market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
   const displayedCloseReference =
@@ -551,6 +692,8 @@ export default function MarketDetailScaffold({ slug }) {
             maximumFractionDigits: 0,
           }).format(tick)
         }
+        formatTimeValue={formatEtTimeWithSeconds}
+        markers={probabilityMarkers}
         sampleCadenceMs={cadenceMs}
         secondaryYDomain={btcDomain}
         secondaryYTicks={btcTicks}
@@ -578,6 +721,8 @@ export default function MarketDetailScaffold({ slug }) {
         yTicks={probabilityTicks}
       />
 
+      <FinalTenSecondTape market={market} rows={finalWindowRows} />
+
       <ReplayLineChart
         eyebrow="Reference BTC"
         title="Chainlink BTC over the same replay buckets"
@@ -590,6 +735,7 @@ export default function MarketDetailScaffold({ slug }) {
             maximumFractionDigits: 0,
           }).format(tick)
         }
+        formatTimeValue={formatEtTimeWithSeconds}
         sampleCadenceMs={cadenceMs}
         series={[
           {

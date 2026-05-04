@@ -133,6 +133,7 @@ export default function ReplayLineChart({
   eyebrow,
   formatAxisValue,
   formatSecondaryAxisValue = null,
+  formatTimeValue = formatEtTime,
   markers = [],
   sampleCadenceMs = 1000,
   secondaryYDomain = null,
@@ -385,7 +386,7 @@ export default function ReplayLineChart({
                   fill="#78716c"
                   fontSize="10"
                 >
-                  {formatEtTime(timeline[index]?.ts)}
+                  {formatTimeValue(timeline[index]?.ts)}
                 </tspan>
               </text>
             </g>
