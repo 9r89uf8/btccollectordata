@@ -15,10 +15,13 @@ async function getRollup(ctx) {
 
 function fromRollup(rollup) {
   if (!rollup) {
-    return buildAnalyticsDashboard({
-      analyticsRows: [],
-      stabilityRows: [],
-    });
+    return {
+      ...buildAnalyticsDashboard({
+        analyticsRows: [],
+        stabilityRows: [],
+      }),
+      marketCountsByDay: [],
+    };
   }
 
   return {
@@ -26,6 +29,7 @@ function fromRollup(rollup) {
     health: rollup.v1?.health,
     hourly: rollup.v3?.hourly,
     leader: rollup.v1?.leader,
+    marketCountsByDay: rollup.v3?.marketCountsByDay ?? [],
     stability: rollup.v2?.stability,
   };
 }

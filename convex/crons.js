@@ -34,7 +34,7 @@ crons.interval(
 
 crons.interval(
   "refresh btc 5m analytics dashboard rollup",
-  { minutes: 60 },
+  { minutes: 360 },
   internal.internal.analyticsRollups.refreshNow,
   {},
 );

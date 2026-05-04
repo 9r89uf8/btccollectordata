@@ -185,17 +185,24 @@ export default function MarketDetailScaffold({ slug }) {
   const market = useQuery(api.markets.getBySlug, { slug });
   const adjacentMarkets = useQuery(api.markets.getAdjacentBySlug, { slug });
   const latestSnapshot = useQuery(api.snapshots.getLatestByMarketSlug, { slug });
-  const replaySnapshots = useQuery(api.snapshots.listByMarketSlug, {
-    slug,
-    limit: 1200,
-  });
+  const replaySnapshots = useQuery(
+    api.snapshots.listReplayByMarketSlug,
+    market
+      ? {
+          slug,
+          windowEndTs: market.windowEndTs,
+          windowStartTs: market.windowStartTs,
+          limit: 420,
+        }
+      : "skip",
+  );
   const marketSummary = useQuery(api.summaries.getByMarketSlug, { slug });
 
   if (
     market === undefined ||
     adjacentMarkets === undefined ||
     latestSnapshot === undefined ||
-    replaySnapshots === undefined ||
+    (market && replaySnapshots === undefined) ||
     marketSummary === undefined
   ) {
     return <LoadingState />;
@@ -225,7 +232,7 @@ export default function MarketDetailScaffold({ slug }) {
   }
 
   const state = getMarketState(market);
-  const { cadenceMs, timeline } = buildReplayTimeline(market, replaySnapshots);
+  const { cadenceMs, timeline } = buildReplayTimeline(market, replaySnapshots ?? []);
   const coverage = getReplayCoverage(timeline);
   const qualityBreakdown = getQualityBreakdown(timeline);
   const latestIssue = findLatestReplayIssue(timeline);

@@ -1,6 +1,36 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 
+const REPLAY_SNAPSHOT_BUFFER_MS = 30 * 1000;
+
+function compactReplaySnapshot(snapshot) {
+  return {
+    _id: snapshot._id,
+    btcBinance: snapshot.btcBinance,
+    btcChainlink: snapshot.btcChainlink,
+    displayRuleUsed: snapshot.displayRuleUsed,
+    downAsk: snapshot.downAsk,
+    downBid: snapshot.downBid,
+    downDepthBidTop: snapshot.downDepthBidTop,
+    downDisplayed: snapshot.downDisplayed,
+    downSpread: snapshot.downSpread,
+    marketId: snapshot.marketId,
+    marketImbalance: snapshot.marketImbalance,
+    marketSlug: snapshot.marketSlug,
+    phase: snapshot.phase,
+    secondBucket: snapshot.secondBucket,
+    secondsFromWindowStart: snapshot.secondsFromWindowStart,
+    sourceQuality: snapshot.sourceQuality,
+    ts: snapshot.ts,
+    upAsk: snapshot.upAsk,
+    upBid: snapshot.upBid,
+    upDepthBidTop: snapshot.upDepthBidTop,
+    upDisplayed: snapshot.upDisplayed,
+    upSpread: snapshot.upSpread,
+    writtenAt: snapshot.writtenAt,
+  };
+}
+
 export const getLatestByMarketSlug = query({
   args: {
     slug: v.string(),
@@ -28,6 +58,32 @@ export const listByMarketSlug = query({
       .take(limit);
 
     return [...snapshots].reverse();
+  },
+});
+
+export const listReplayByMarketSlug = query({
+  args: {
+    slug: v.string(),
+    windowEndTs: v.number(),
+    windowStartTs: v.number(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 420, 600));
+    const fromBucket = args.windowStartTs - REPLAY_SNAPSHOT_BUFFER_MS;
+    const toBucket = args.windowEndTs + REPLAY_SNAPSHOT_BUFFER_MS;
+    const snapshots = await ctx.db
+      .query("market_snapshots_1s")
+      .withIndex("by_marketSlug_secondBucket", (q) =>
+        q
+          .eq("marketSlug", args.slug)
+          .gte("secondBucket", fromBucket)
+          .lte("secondBucket", toBucket),
+      )
+      .order("desc")
+      .take(limit);
+
+    return [...snapshots].reverse().map(compactReplaySnapshot);
   },
 });
 

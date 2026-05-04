@@ -1551,15 +1551,12 @@ function StabilitySection({ computedAt, stability }) {
 
 export default function AnalyticsDashboard() {
   const dashboard = useQuery(api.analytics.getDashboard);
-  const marketCountsByDay = useQuery(api.markets.listCountsByDay, {
-    limitDays: 14,
-  });
 
   if (!dashboard) {
     return <Loading />;
   }
 
-  const { computedAt, health, hourly, stability } = dashboard;
+  const { computedAt, health, hourly, marketCountsByDay, stability } = dashboard;
 
   if (!stability?.cleanCount) {
     return (

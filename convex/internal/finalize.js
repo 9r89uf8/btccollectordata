@@ -11,6 +11,9 @@ import { getBoundaryReferences } from "./btcReferences.js";
 import { materializeMarketAnalyticsForSlug } from "./marketAnalytics.js";
 import { materializeMarketStabilityAnalyticsForSlug } from "./marketStabilityAnalytics.js";
 
+const SUMMARY_SNAPSHOT_BUFFER_MS = 30 * 1000;
+const FINALIZE_ELIGIBLE_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+
 async function getMarketBySlug(ctx, slug) {
   return await ctx.db
     .query("markets")
@@ -25,10 +28,15 @@ async function getSummaryByMarketSlug(ctx, slug) {
     .unique();
 }
 
-async function getSnapshotsByMarketSlug(ctx, slug) {
+async function getSnapshotsForSummary(ctx, market) {
   return await ctx.db
     .query("market_snapshots_1s")
-    .withIndex("by_marketSlug_ts", (q) => q.eq("marketSlug", slug))
+    .withIndex("by_marketSlug_secondBucket", (q) =>
+      q
+        .eq("marketSlug", market.slug)
+        .gte("secondBucket", market.windowStartTs - SUMMARY_SNAPSHOT_BUFFER_MS)
+        .lte("secondBucket", market.windowEndTs + SUMMARY_SNAPSHOT_BUFFER_MS),
+    )
     .collect();
 }
 
@@ -43,13 +51,19 @@ async function materializeAnalyticsForFinalizedMarket(ctx, { nowTs, slug }) {
   });
 }
 
-async function listEndedMarketsPage(ctx, { beforeWindowEndTs, limit, nowTs }) {
+async function listEndedMarketsPage(
+  ctx,
+  { afterWindowEndTs, beforeWindowEndTs, limit, nowTs },
+) {
   const upperBound =
     beforeWindowEndTs == null ? nowTs : Math.min(beforeWindowEndTs, nowTs);
+  const lowerBound = Math.max(0, afterWindowEndTs ?? 0);
 
   return await ctx.db
     .query("markets")
-    .withIndex("by_windowEndTs", (q) => q.lte("windowEndTs", upperBound))
+    .withIndex("by_windowEndTs", (q) =>
+      q.gte("windowEndTs", lowerBound).lte("windowEndTs", upperBound),
+    )
     .order("desc")
     .take(limit);
 }
@@ -98,7 +112,7 @@ async function finalizeOneMarket(ctx, market, { force = false, nowTs }) {
 
   const [boundaryReferences, snapshots] = await Promise.all([
     getBoundaryReferences(ctx, market),
-    getSnapshotsByMarketSlug(ctx, market.slug),
+    getSnapshotsForSummary(ctx, market),
   ]);
   const result = buildMarketSummary({
     boundaryReferences,
@@ -236,11 +250,22 @@ export const finalizeEligibleMarkets = internalMutation({
   args: {
     force: v.optional(v.boolean()),
     limit: v.optional(v.number()),
+    lookbackMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const force = args.force ?? false;
     const limit = Math.max(1, Math.min(args.limit ?? 25, 200));
     const nowTs = Date.now();
+    const lookbackMs = force
+      ? null
+      : Math.max(
+          5 * 60 * 1000,
+          Math.min(
+            args.lookbackMs ?? FINALIZE_ELIGIBLE_LOOKBACK_MS,
+            7 * 24 * 60 * 60 * 1000,
+          ),
+        );
+    const lowerWindowEndTs = lookbackMs == null ? 0 : nowTs - lookbackMs;
     const pageSize = Math.min(200, Math.max(limit * 2, 50));
     const eligibleMarkets = [];
     let scanned = 0;
@@ -248,6 +273,7 @@ export const finalizeEligibleMarkets = internalMutation({
 
     while (eligibleMarkets.length < limit) {
       const page = await listEndedMarketsPage(ctx, {
+        afterWindowEndTs: lowerWindowEndTs,
         beforeWindowEndTs: cursorWindowEndTs,
         limit: pageSize,
         nowTs,
@@ -281,7 +307,7 @@ export const finalizeEligibleMarkets = internalMutation({
 
       cursorWindowEndTs = page[page.length - 1].windowEndTs - 1;
 
-      if (cursorWindowEndTs < 0) {
+      if (cursorWindowEndTs <= lowerWindowEndTs) {
         break;
       }
     }
@@ -415,6 +441,7 @@ export const reconcileRecentClosedMarkets = internalAction({
       {
         force: args.force ?? false,
         limit: args.finalizeLimit ?? 25,
+        lookbackMs: 12 * 60 * 60 * 1000,
       },
     );
 

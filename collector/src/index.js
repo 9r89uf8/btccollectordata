@@ -126,6 +126,7 @@ async function main() {
     lastBatchSentAt: null,
     lastBtcTickAt: null,
     lastError: null,
+    lastHealthSentAt: null,
     lastMarketEventAt: null,
     lastParityLogAt: null,
     lastWsEventAt: null,
@@ -366,6 +367,10 @@ async function main() {
       rawEvents: rawEvents.length,
       snapshots: snapshots.length,
     };
+    const shouldSendHealth =
+      force ||
+      state.lastHealthSentAt === null ||
+      sentAt - state.lastHealthSentAt >= config.collectorHeartbeatMs;
     state.flushInFlight = true;
 
     try {
@@ -375,8 +380,11 @@ async function main() {
         btcTicks,
         snapshots,
         snapshotCaptureMode: state.snapshotCaptureMode,
-        health: buildHealth(sentAt, batchCounts),
       };
+
+      if (shouldSendHealth) {
+        batch.health = buildHealth(sentAt, batchCounts);
+      }
 
       await ingestClient.sendBatch(batch);
 
@@ -393,6 +401,9 @@ async function main() {
       }
 
       state.lastBatchSentAt = sentAt;
+      if (shouldSendHealth) {
+        state.lastHealthSentAt = sentAt;
+      }
       state.lastError = null;
     } catch (error) {
       state.lastError = formatError(error);

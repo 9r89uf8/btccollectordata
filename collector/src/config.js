@@ -154,8 +154,8 @@ export function loadCollectorConfig() {
       1000,
     ),
     collectorHeartbeatMs: toNumber(
-      readEnv("COLLECTOR_HEARTBEAT_MS", "10000", fileEnv),
-      10000,
+      readEnv("COLLECTOR_HEARTBEAT_MS", "30000", fileEnv),
+      30000,
     ),
     rtdsHeartbeatMs: toNumber(
       readEnv("RTDS_HEARTBEAT_MS", "5000", fileEnv),
