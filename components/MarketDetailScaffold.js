@@ -259,6 +259,44 @@ function formatBtcAxisValue(tick) {
   }).format(tick);
 }
 
+function getPriceToBeatSource(market) {
+  if (market.priceToBeatOfficial != null) {
+    return "official";
+  }
+
+  if (market.priceToBeatDerived != null) {
+    return "derived";
+  }
+
+  return market.active ? "awaiting official reference" : "reference unavailable";
+}
+
+function getEndingBtcSnapshot(rows, key, market) {
+  const finiteRows = rows.filter((row) => Number.isFinite(row?.[key]));
+
+  if (finiteRows.length === 0) {
+    return null;
+  }
+
+  const rowsAtOrBeforeClose = Number.isFinite(market?.windowEndTs)
+    ? finiteRows.filter((row) => row.secondBucket <= market.windowEndTs)
+    : finiteRows;
+  const candidates =
+    rowsAtOrBeforeClose.length > 0 ? rowsAtOrBeforeClose : finiteRows;
+
+  return candidates[candidates.length - 1];
+}
+
+function formatEndingBtcNote(snapshot) {
+  if (!snapshot) {
+    return "no final-window sample";
+  }
+
+  return `${formatElapsedMarketTime(
+    snapshot.secondsFromWindowStart,
+  )} / ${formatEtTimeWithSeconds(snapshot.secondBucket ?? snapshot.ts)}`;
+}
+
 function MarketPagerButton({ direction, market }) {
   const isPrevious = direction === "previous";
   const title = isPrevious ? "Previous market" : "Next market";
@@ -391,6 +429,9 @@ function FinalTenSecondChart({ market, rows }) {
   const finalBtcDomain = getBtcDomain(rows, finalBtcKeys);
   const finalBtcTicks = getBtcTicks(finalBtcDomain);
   const showBtcAxis = hasBtcValues(rows, finalBtcKeys);
+  const priceToBeat = market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
+  const endingChainlink = getEndingBtcSnapshot(rows, "btcChainlink", market);
+  const endingBinance = getEndingBtcSnapshot(rows, "btcBinance", market);
 
   return (
     <ReplayLineChart
@@ -438,6 +479,26 @@ function FinalTenSecondChart({ market, rows }) {
           dashArray: "3 5",
           key: "btcBinance",
           label: "Binance BTC",
+        },
+      ]}
+      summaryItems={[
+        {
+          label: "Price to beat",
+          note: getPriceToBeatSource(market),
+          value: formatBtcReferenceValue(
+            priceToBeat,
+            market.active ? "not published yet" : "missing",
+          ),
+        },
+        {
+          label: "End Chainlink BTC",
+          note: formatEndingBtcNote(endingChainlink),
+          value: formatBtcUsd(endingChainlink?.btcChainlink),
+        },
+        {
+          label: "End Binance BTC",
+          note: formatEndingBtcNote(endingBinance),
+          value: formatBtcUsd(endingBinance?.btcBinance),
         },
       ]}
       secondaryYDomain={showBtcAxis ? finalBtcDomain : null}
@@ -541,14 +602,7 @@ export default function MarketDetailScaffold({ slug }) {
   const activeReferenceFallback = market.active ? "not published yet" : "missing";
   const derivedReferenceFallback =
     market.active && !market.resolved ? "computed on finalize" : "missing";
-  const displayedPriceToBeatLabel =
-    market.priceToBeatOfficial != null
-      ? "official"
-      : market.priceToBeatDerived != null
-        ? "derived"
-        : market.active
-          ? "awaiting official reference"
-          : "reference unavailable";
+  const displayedPriceToBeatLabel = getPriceToBeatSource(market);
 
   return (
     <section className="space-y-6">

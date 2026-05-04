@@ -149,6 +149,7 @@ export default function ReplayLineChart({
   secondaryYDomain = null,
   secondaryYTicks = [],
   series,
+  summaryItems = [],
   timeline,
   title,
   xTickMode = "auto",
@@ -239,6 +240,24 @@ export default function ReplayLineChart({
           ))}
         </div>
       </div>
+
+      {summaryItems.length > 0 ? (
+        <div className="mt-5 grid gap-y-4 border-y border-black/10 py-4 sm:grid-cols-3 sm:divide-x sm:divide-black/10">
+          {summaryItems.map((item) => (
+            <div key={item.label} className="min-w-0 sm:px-4 sm:first:pl-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
+                {item.label}
+              </p>
+              <p className="mt-1 truncate text-lg font-semibold tracking-[-0.03em] text-stone-950">
+                {item.value}
+              </p>
+              {item.note ? (
+                <p className="mt-1 truncate text-xs text-stone-600">{item.note}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-6 overflow-x-auto rounded-[1.3rem] border border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,244,241,0.96))] p-4">
         <svg
