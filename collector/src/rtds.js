@@ -19,7 +19,7 @@ function createSubscriptions(enableBinanceContext) {
     subscriptions.push({
       topic: RTDS_TOPICS.BINANCE_CRYPTO,
       type: "update",
-      filters: BTC_SYMBOLS.BINANCE_BTC_USDT,
+      filters: JSON.stringify({ symbol: BTC_SYMBOLS.BINANCE_BTC_USDT }),
     });
   }
 
@@ -128,6 +128,20 @@ function parseSocketPayload(data) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
+function formatServerError(message) {
+  const statusCode = Number(message?.statusCode);
+  const detail =
+    typeof message?.body?.message === "string"
+      ? message.body.message
+      : typeof message?.message === "string"
+        ? message.message
+        : "unknown RTDS server error";
+
+  return Number.isFinite(statusCode)
+    ? `RTDS server error ${statusCode}: ${detail}`
+    : `RTDS server error: ${detail}`;
+}
+
 export function startRtdsClient({
   config,
   onTick,
@@ -208,6 +222,13 @@ export function startRtdsClient({
     }
 
     for (const message of messages) {
+      const statusCode = Number(message?.statusCode);
+
+      if (Number.isFinite(statusCode) && statusCode >= 400) {
+        onError?.(new Error(formatServerError(message)));
+        continue;
+      }
+
       const ticks = extractTicksFromMessage(message);
 
       for (const tick of ticks) {

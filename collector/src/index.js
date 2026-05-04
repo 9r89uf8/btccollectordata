@@ -497,12 +497,13 @@ async function main() {
 
     try {
       const activeAssetIds = getActiveAssetIds(state.activeMarkets);
-      const nowTs = Date.now();
+      let nowTs = Date.now();
       let pollSnapshots = [];
       let pollError = null;
 
       try {
         const pollMarketData = await fetchClobMarketData(config, activeAssetIds);
+        nowTs = Date.now();
         state.lastPollEndpointErrors = pollMarketData.endpointErrors.slice(0, 5);
 
         if (pollMarketData.endpointErrors.length > 0) {
