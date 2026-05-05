@@ -233,13 +233,17 @@ async function main() {
     : null;
 
   function queueBtcTick(tick) {
-    pendingTicks.set(dedupeKeyForTick(tick), tick);
-    state.latestTicksByKey.set(latestTickKey(tick), tick);
-
     const asset = getCryptoAssetForSymbol({
       source: tick.source,
       symbol: tick.symbol,
     });
+
+    if (!asset || !config.cryptoAssets.includes(asset)) {
+      return;
+    }
+
+    pendingTicks.set(dedupeKeyForTick(tick), tick);
+    state.latestTicksByKey.set(latestTickKey(tick), tick);
 
     if (asset === CRYPTO_ASSETS.BTC && tick.source === PRICE_SOURCES.CHAINLINK) {
       state.latestChainlinkTick = tick;

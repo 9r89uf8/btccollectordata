@@ -32,7 +32,6 @@ function createSubscriptions({ cryptoAssets = DEFAULT_CRYPTO_ASSETS, enableBinan
     subscriptions.push({
       topic: RTDS_TOPICS.BINANCE_CRYPTO,
       type: "update",
-      filters: binanceSymbols.join(","),
     });
   }
 

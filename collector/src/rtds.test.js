@@ -83,7 +83,9 @@ test("startRtdsClient subscribes to BTC and ETH Chainlink and Binance feeds", as
     assert.deepEqual(JSON.parse(message.subscriptions[1].filters), {
       symbol: "eth/usd",
     });
-    assert.equal(message.subscriptions[2].filters, "btcusdt,ethusdt");
+    assert.equal(message.subscriptions[2].topic, "crypto_prices");
+    assert.equal(message.subscriptions[2].type, "update");
+    assert.equal(Object.hasOwn(message.subscriptions[2], "filters"), false);
 
     client.stop();
   });
