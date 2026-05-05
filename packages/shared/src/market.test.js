@@ -5,8 +5,10 @@ import {
   BTC_FIVE_MINUTE_WINDOW_MS,
   ET_TIME_ZONE,
   deriveBtcFiveMinuteWindow,
+  matchesCryptoFiveMinuteFamily,
   extractOutcomeTokenMap,
   matchesBtcFiveMinuteFamily,
+  parseCryptoFiveMinuteWindowFromSlug,
   parseBtcFiveMinuteWindow,
   parseBtcFiveMinuteWindowFromSlug,
 } from "./market.js";
@@ -66,6 +68,18 @@ test("parseBtcFiveMinuteWindowFromSlug derives exact UTC window", () => {
   });
 });
 
+test("parseCryptoFiveMinuteWindowFromSlug derives ETH windows", () => {
+  const parsed = parseCryptoFiveMinuteWindowFromSlug("eth-updown-5m-1776045900");
+
+  assert.deepEqual(parsed, {
+    asset: "eth",
+    windowStartTs: 1776045900 * 1000,
+    windowEndTs: 1776045900 * 1000 + BTC_FIVE_MINUTE_WINDOW_MS,
+    timezone: ET_TIME_ZONE,
+    source: "slug",
+  });
+});
+
 test("deriveBtcFiveMinuteWindow falls back to slug when needed", () => {
   const parsed = deriveBtcFiveMinuteWindow({
     slug: "btc-updown-5m-1776045900",
@@ -111,6 +125,28 @@ test("matchesBtcFiveMinuteFamily accepts real BTC 5m-like event shape", () => {
   });
 
   assert.equal(result.matches, true);
+  assert.equal(result.matchReason, "slug");
+  assert.equal(result.parsedWindow.windowStartTs, Date.parse("2026-04-13T02:05:00Z"));
+});
+
+test("matchesCryptoFiveMinuteFamily accepts ETH 5m event shape", () => {
+  const result = matchesCryptoFiveMinuteFamily({
+    event: {
+      slug: "eth-updown-5m-1776045900",
+      title: "Ethereum Up or Down - April 12, 10:05PM-10:10PM ET",
+      resolutionSource: "https://data.chain.link/streams/eth-usd",
+      endDate: "2026-04-13T02:10:00Z",
+    },
+    market: {
+      slug: "eth-updown-5m-1776045900",
+      question: "Ethereum Up or Down - April 12, 10:05PM-10:10PM ET",
+      resolutionSource: "https://data.chain.link/streams/eth-usd",
+      eventStartTime: "2026-04-13T02:05:00Z",
+    },
+  });
+
+  assert.equal(result.matches, true);
+  assert.equal(result.asset, "eth");
   assert.equal(result.matchReason, "slug");
   assert.equal(result.parsedWindow.windowStartTs, Date.parse("2026-04-13T02:05:00Z"));
 });

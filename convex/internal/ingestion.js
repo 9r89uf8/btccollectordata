@@ -8,6 +8,7 @@ import { syncActiveMarketStartReferences } from "./btcReferences.js";
 
 const nullableString = v.union(v.string(), v.null());
 const nullableNumber = v.union(v.number(), v.null());
+const cryptoAssetValue = v.union(v.literal("btc"), v.literal("eth"));
 
 const rawEventValidator = v.object({
   marketSlug: v.string(),
@@ -32,6 +33,7 @@ const rawEventValidator = v.object({
 });
 
 const snapshotValidator = v.object({
+  asset: v.optional(cryptoAssetValue),
   marketSlug: v.string(),
   marketId: v.string(),
   ts: v.number(),
@@ -69,12 +71,20 @@ const snapshotValidator = v.object({
   ),
   btcChainlink: nullableNumber,
   btcBinance: nullableNumber,
+  ethChainlink: v.optional(nullableNumber),
+  ethBinance: v.optional(nullableNumber),
   btcChainlinkTs: v.optional(nullableNumber),
   btcChainlinkReceivedAt: v.optional(nullableNumber),
   btcChainlinkReceivedAgeMs: v.optional(nullableNumber),
   btcBinanceTs: v.optional(nullableNumber),
   btcBinanceReceivedAt: v.optional(nullableNumber),
   btcBinanceReceivedAgeMs: v.optional(nullableNumber),
+  ethChainlinkTs: v.optional(nullableNumber),
+  ethChainlinkReceivedAt: v.optional(nullableNumber),
+  ethChainlinkReceivedAgeMs: v.optional(nullableNumber),
+  ethBinanceTs: v.optional(nullableNumber),
+  ethBinanceReceivedAt: v.optional(nullableNumber),
+  ethBinanceReceivedAgeMs: v.optional(nullableNumber),
   marketImbalance: nullableNumber,
   sourceQuality: v.union(
     v.literal("good"),

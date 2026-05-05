@@ -1,10 +1,15 @@
 import { paginationOptsValidator } from "convex/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import {
+  CRYPTO_ASSETS,
+  normalizeCryptoAssets,
+} from "../packages/shared/src/ingest.js";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
 const EXPECTED_BTC_5M_MARKETS_PER_DAY = 288;
+const cryptoAssetValue = v.union(v.literal("btc"), v.literal("eth"));
 const archiveStatusValue = v.union(
   v.literal("past"),
   v.literal("resolved"),
@@ -17,6 +22,18 @@ function getUtcDayKey(ts) {
   }
 
   return new Date(ts).toISOString().slice(0, 10);
+}
+
+function getMarketAsset(market) {
+  return market.asset ?? CRYPTO_ASSETS.BTC;
+}
+
+function isMarketAsset(market, asset) {
+  return getMarketAsset(market) === asset;
+}
+
+function getRequestedAssets(assets, fallback = [CRYPTO_ASSETS.BTC]) {
+  return new Set(normalizeCryptoAssets(assets, fallback));
 }
 
 function getActiveSortPriority(market, nowTs) {
@@ -51,20 +68,36 @@ function sortActiveMarkets(markets, nowTs) {
 export const listActiveBtc5m = query({
   args: {},
   handler: async (ctx) => {
-    const nowTs = Date.now();
-    const markets = await ctx.db
-      .query("markets")
-      .withIndex("by_active_windowStartTs", (q) =>
-        q.eq("active", true).lte("windowStartTs", nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS),
-      )
-      .collect();
+    return await listActiveMarketsByAssets(ctx, [CRYPTO_ASSETS.BTC]);
+  },
+});
 
-    return sortActiveMarkets(
-      markets.filter(
-        (market) => market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS,
-      ),
-      nowTs,
-    );
+async function listActiveMarketsByAssets(ctx, assets) {
+  const nowTs = Date.now();
+  const requestedAssets = getRequestedAssets(assets);
+  const markets = await ctx.db
+    .query("markets")
+    .withIndex("by_active_windowStartTs", (q) =>
+      q.eq("active", true).lte("windowStartTs", nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS),
+    )
+    .collect();
+
+  return sortActiveMarkets(
+    markets.filter(
+      (market) =>
+        requestedAssets.has(getMarketAsset(market)) &&
+        market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS,
+    ),
+    nowTs,
+  );
+}
+
+export const listActiveCrypto5m = query({
+  args: {
+    assets: v.optional(v.array(cryptoAssetValue)),
+  },
+  handler: async (ctx, args) => {
+    return await listActiveMarketsByAssets(ctx, args.assets ?? [CRYPTO_ASSETS.BTC]);
   },
 });
 
@@ -73,11 +106,13 @@ export const listRecentBtc5m = query({
   handler: async (ctx, args) => {
     const limit = Math.max(1, Math.min(args.limit ?? 12, 50));
 
-    return await ctx.db
+    const rows = await ctx.db
       .query("markets")
       .withIndex("by_windowStartTs")
       .order("desc")
-      .take(limit);
+      .take(limit * 4);
+
+    return rows.filter((market) => isMarketAsset(market, CRYPTO_ASSETS.BTC)).slice(0, limit);
   },
 });
 
@@ -99,7 +134,7 @@ export const listCountsByDay = query({
       .take(scanLimit);
     const byDay = new Map();
 
-    for (const market of rows) {
+    for (const market of rows.filter((row) => isMarketAsset(row, CRYPTO_ASSETS.BTC))) {
       const day = getUtcDayKey(market.windowStartTs);
       const existing =
         byDay.get(day) ?? {
@@ -149,26 +184,41 @@ export const listArchiveBtc5m = query({
     const status = args.status ?? "past";
 
     if (status === "past") {
-      return await ctx.db
+      const result = await ctx.db
         .query("markets")
         .withIndex("by_active_windowStartTs", (q) => q.eq("active", false))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...result,
+        page: result.page.filter((market) => isMarketAsset(market, CRYPTO_ASSETS.BTC)),
+      };
     }
 
     if (status === "resolved") {
-      return await ctx.db
+      const result = await ctx.db
         .query("markets")
         .withIndex("by_resolved_windowEndTs", (q) => q.eq("resolved", true))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...result,
+        page: result.page.filter((market) => isMarketAsset(market, CRYPTO_ASSETS.BTC)),
+      };
     }
 
-    return await ctx.db
+    const result = await ctx.db
       .query("markets")
       .withIndex("by_windowStartTs")
       .order("desc")
       .paginate(args.paginationOpts);
+
+    return {
+      ...result,
+      page: result.page.filter((market) => isMarketAsset(market, CRYPTO_ASSETS.BTC)),
+    };
   },
 });
 
@@ -197,16 +247,41 @@ export const getAdjacentBySlug = query({
       };
     }
 
-    const previous = await ctx.db
-      .query("markets")
-      .withIndex("by_windowStartTs", (q) => q.lt("windowStartTs", market.windowStartTs))
-      .order("desc")
-      .first();
-    const next = await ctx.db
-      .query("markets")
-      .withIndex("by_windowStartTs", (q) => q.gt("windowStartTs", market.windowStartTs))
-      .order("asc")
-      .first();
+    const asset = getMarketAsset(market);
+    let previous = null;
+    let previousCursor = market.windowStartTs;
+    let next = null;
+    let nextCursor = market.windowStartTs;
+
+    for (let scan = 0; scan < 5 && !previous; scan += 1) {
+      const page = await ctx.db
+        .query("markets")
+        .withIndex("by_windowStartTs", (q) => q.lt("windowStartTs", previousCursor))
+        .order("desc")
+        .take(50);
+
+      previous = page.find((candidate) => getMarketAsset(candidate) === asset) ?? null;
+      previousCursor = page[page.length - 1]?.windowStartTs ?? previousCursor;
+
+      if (page.length < 50) {
+        break;
+      }
+    }
+
+    for (let scan = 0; scan < 5 && !next; scan += 1) {
+      const page = await ctx.db
+        .query("markets")
+        .withIndex("by_windowStartTs", (q) => q.gt("windowStartTs", nextCursor))
+        .order("asc")
+        .take(50);
+
+      next = page.find((candidate) => getMarketAsset(candidate) === asset) ?? null;
+      nextCursor = page[page.length - 1]?.windowStartTs ?? nextCursor;
+
+      if (page.length < 50) {
+        break;
+      }
+    }
 
     return {
       next,
@@ -231,6 +306,7 @@ export const seedDemoMarket = mutation({
 
     return await ctx.db.insert("markets", {
       slug,
+      asset: CRYPTO_ASSETS.BTC,
       marketId: `demo-${slug}`,
       conditionId: null,
       eventId: null,

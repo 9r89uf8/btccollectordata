@@ -6,10 +6,15 @@ import {
 } from "../_generated/server";
 import { v } from "convex/values";
 import { TARGET_PATH_RISK_CHECKPOINTS } from "../../packages/shared/src/analyticsDashboard.js";
+import { CRYPTO_ASSETS } from "../../packages/shared/src/ingest.js";
 
 const TARGET_PATH_RISK_CHECKPOINT_SET = new Set(TARGET_PATH_RISK_CHECKPOINTS);
 const EXPECTED_BTC_5M_MARKETS_PER_DAY = 288;
 const rollupModeValue = v.union(v.literal("recent"), v.literal("full"));
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 async function getRollupByKey(ctx, key) {
   return await ctx.db
@@ -255,7 +260,7 @@ export const listMarketCountsByDay = internalQuery({
       .order("desc")
       .take(scanLimit);
 
-    return finishMarketCountsByDay(rows, limitDays);
+    return finishMarketCountsByDay(rows.filter(isBtcMarket), limitDays);
   },
 });
 

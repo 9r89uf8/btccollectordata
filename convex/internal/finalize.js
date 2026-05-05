@@ -7,12 +7,17 @@ import {
   internalQuery,
 } from "../_generated/server";
 import { buildMarketSummary } from "../../packages/shared/src/summary.js";
+import { CRYPTO_ASSETS } from "../../packages/shared/src/ingest.js";
 import { getBoundaryReferences } from "./btcReferences.js";
 import { materializeMarketAnalyticsForSlug } from "./marketAnalytics.js";
 import { materializeMarketStabilityAnalyticsForSlug } from "./marketStabilityAnalytics.js";
 
 const SUMMARY_SNAPSHOT_BUFFER_MS = 30 * 1000;
 const FINALIZE_ELIGIBLE_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 async function getMarketBySlug(ctx, slug) {
   return await ctx.db
@@ -93,6 +98,14 @@ function summaryNeedsRefresh(market, existingSummary) {
 }
 
 async function finalizeOneMarket(ctx, market, { force = false, nowTs }) {
+  if (!isBtcMarket(market)) {
+    return {
+      asset: market.asset,
+      slug: market.slug,
+      status: "skipped_unsupported_asset",
+    };
+  }
+
   const existingSummary = await getSummaryByMarketSlug(ctx, market.slug);
 
   if (existingSummary && !force && !summaryNeedsRefresh(market, existingSummary)) {
@@ -219,6 +232,7 @@ function summarizeFinalizationResults(results, scanned) {
         "missing_outcome",
         "missing_market",
         "not_ready",
+        "skipped_unsupported_asset",
       ].includes(result.status),
     ).length,
   };
@@ -285,6 +299,10 @@ export const finalizeEligibleMarkets = internalMutation({
 
       for (const market of page) {
         scanned += 1;
+
+        if (!isBtcMarket(market)) {
+          continue;
+        }
 
         if (force) {
           eligibleMarkets.push(market);
@@ -392,6 +410,7 @@ export const listRecentClosedSyncCandidates = internalQuery({
       .collect();
 
     return markets
+      .filter(isBtcMarket)
       .filter((market) =>
         market.winningOutcome == null ||
         market.priceToBeatOfficial == null ||

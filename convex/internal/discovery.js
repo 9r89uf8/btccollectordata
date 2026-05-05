@@ -3,11 +3,17 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { action, internalAction, internalMutation } from "../_generated/server";
 import {
+  CRYPTO_ASSETS,
+  DEFAULT_CRYPTO_ASSETS,
+  normalizeCryptoAssets,
+} from "../../packages/shared/src/ingest.js";
+import {
   CAPTURE_MODES,
   DATA_QUALITY,
   MARKET_OUTCOMES,
   extractOutcomeTokenMap,
-  matchesBtcFiveMinuteFamily,
+  getCryptoFiveMinuteMarketFamily,
+  matchesCryptoFiveMinuteFamily,
   parseGammaJsonArray,
   normalizeOutcomeLabel,
 } from "../../packages/shared/src/market.js";
@@ -99,13 +105,13 @@ function deriveWinningOutcomeFromMarket(market) {
     : MARKET_OUTCOMES.DOWN;
 }
 
-function normalizeGammaMarket({ event, market }) {
-  const familyMatch = matchesBtcFiveMinuteFamily({ event, market });
+function normalizeGammaMarket({ asset = null, event, market }) {
+  const familyMatch = matchesCryptoFiveMinuteFamily({ asset, event, market });
 
   if (!familyMatch.matches || !familyMatch.parsedWindow) {
     return {
       market: null,
-      skipReason: "not_btc_5m_family",
+      skipReason: asset ? `not_${asset}_5m_family` : "not_crypto_5m_family",
     };
   }
 
@@ -154,6 +160,7 @@ function normalizeGammaMarket({ event, market }) {
 
   return {
     market: {
+      asset: familyMatch.asset,
       slug,
       marketId: String(market.id),
       conditionId: cleanString(market.conditionId),
@@ -188,19 +195,26 @@ function normalizeGammaMarket({ event, market }) {
 }
 
 async function fetchGammaEventsPage({
+  asset = CRYPTO_ASSETS.BTC,
   cursor,
   limit,
   slug,
   statusFilter = "all",
 }) {
+  const family = getCryptoFiveMinuteMarketFamily(asset);
+
+  if (!family && !slug) {
+    throw new Error(`Unsupported crypto 5m asset: ${asset}`);
+  }
+
   const url = new URL("/events/keyset", GAMMA_BASE);
   url.searchParams.set("limit", String(limit));
 
   if (slug) {
     url.searchParams.set("slug", slug);
   } else {
-    url.searchParams.set("tag_slug", "bitcoin");
-    url.searchParams.set("title_search", "Bitcoin Up or Down");
+    url.searchParams.set("tag_slug", family.gammaTagSlug);
+    url.searchParams.set("title_search", family.titleSearch);
   }
 
   if (cursor) {
@@ -262,9 +276,10 @@ function incrementReason(map, reason) {
   map[reason] = (map[reason] ?? 0) + 1;
 }
 
-function createSkipSummary() {
+function createSkipSummary(asset = CRYPTO_ASSETS.BTC) {
   return {
-    not_btc_5m_family: 0,
+    [`not_${asset}_5m_family`]: 0,
+    not_crypto_5m_family: 0,
     missing_outcome_token_mapping: 0,
     missing_slug_or_question: 0,
   };
@@ -303,92 +318,152 @@ async function findExistingMarket(ctx, market) {
   return null;
 }
 
+function getStoredMarketAsset(market) {
+  return market.asset ?? CRYPTO_ASSETS.BTC;
+}
+
+async function syncActiveCryptoAssetMarkets(ctx, { asset, limit, maxPages }) {
+  let cursor = null;
+  let pageCount = 0;
+  let fetchedEvents = 0;
+  let retriesUsed = 0;
+  const discoveredMarkets = [];
+  const seenSlugs = new Set();
+  const skipSummary = createSkipSummary(asset);
+
+  while (pageCount < maxPages) {
+    const page = await fetchGammaEventsPage({
+      asset,
+      cursor,
+      limit,
+      statusFilter: "active",
+    });
+
+    pageCount += 1;
+    fetchedEvents += page.events.length;
+    retriesUsed += page.retriesUsed;
+
+    for (const event of page.events) {
+      for (const market of Array.isArray(event.markets) ? event.markets : []) {
+        const normalized = normalizeGammaMarket({ asset, event, market });
+
+        if (!normalized.market) {
+          incrementReason(skipSummary, normalized.skipReason ?? `not_${asset}_5m_family`);
+          continue;
+        }
+
+        discoveredMarkets.push(normalized.market);
+        seenSlugs.add(normalized.market.slug);
+      }
+    }
+
+    if (!page.nextCursor || page.events.length === 0) {
+      cursor = page.nextCursor;
+      break;
+    }
+
+    cursor = page.nextCursor;
+  }
+
+  const upsertResult = await ctx.runMutation(
+    internal.internal.discovery.upsertDiscoveredMarkets,
+    { markets: discoveredMarkets },
+  );
+  const staleResult = await ctx.runMutation(
+    internal.internal.discovery.markEndedMarketsInactive,
+    { asset, seenSlugs: [...seenSlugs], nowTs: Date.now() },
+  );
+
+  if (discoveredMarkets.length === 0 || skipSummary.missing_outcome_token_mapping > 0) {
+    console.warn("[discovery] sync summary", {
+      asset,
+      discoveredCount: discoveredMarkets.length,
+      fetchedEvents,
+      pageCount,
+      retriesUsed,
+      skipSummary,
+    });
+  } else {
+    console.log("[discovery] sync summary", {
+      asset,
+      discoveredCount: discoveredMarkets.length,
+      fetchedEvents,
+      pageCount,
+      retriesUsed,
+      skipSummary,
+    });
+  }
+
+  return {
+    asset,
+    fetchedEvents,
+    discoveredCount: discoveredMarkets.length,
+    pagesProcessed: pageCount,
+    nextCursor: cursor,
+    retriesUsed,
+    skipSummary,
+    ...upsertResult,
+    ...staleResult,
+  };
+}
+
+export const syncActiveCrypto5mMarkets = internalAction({
+  args: {
+    assets: v.optional(v.array(v.union(v.literal("btc"), v.literal("eth")))),
+    limit: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const assets = normalizeCryptoAssets(args.assets, DEFAULT_CRYPTO_ASSETS);
+    const limit = Math.max(1, Math.min(args.limit ?? 200, 500));
+    const maxPages = Math.max(1, Math.min(args.maxPages ?? 10, 25));
+    const results = [];
+
+    for (const asset of assets) {
+      results.push(await syncActiveCryptoAssetMarkets(ctx, { asset, limit, maxPages }));
+    }
+
+    return {
+      assets,
+      results,
+      discoveredCount: results.reduce(
+        (total, result) => total + result.discoveredCount,
+        0,
+      ),
+      fetchedEvents: results.reduce((total, result) => total + result.fetchedEvents, 0),
+      inserted: results.reduce((total, result) => total + result.inserted, 0),
+      updated: results.reduce((total, result) => total + result.updated, 0),
+    };
+  },
+});
+
 export const syncActiveBtc5mMarkets = internalAction({
   args: {
     limit: v.optional(v.number()),
     maxPages: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = Math.max(1, Math.min(args.limit ?? 200, 500));
-    const maxPages = Math.max(1, Math.min(args.maxPages ?? 10, 25));
-    let cursor = null;
-    let pageCount = 0;
-    let fetchedEvents = 0;
-    let retriesUsed = 0;
-    const discoveredMarkets = [];
-    const seenSlugs = new Set();
-    const skipSummary = createSkipSummary();
+    const result = await syncActiveCryptoAssetMarkets(ctx, {
+      asset: CRYPTO_ASSETS.BTC,
+      limit: Math.max(1, Math.min(args.limit ?? 200, 500)),
+      maxPages: Math.max(1, Math.min(args.maxPages ?? 10, 25)),
+    });
 
-    while (pageCount < maxPages) {
-      const page = await fetchGammaEventsPage({
-        cursor,
-        limit,
-        statusFilter: "active",
-      });
+    return result;
+  },
+});
 
-      pageCount += 1;
-      fetchedEvents += page.events.length;
-      retriesUsed += page.retriesUsed;
-
-      for (const event of page.events) {
-        for (const market of Array.isArray(event.markets) ? event.markets : []) {
-          const normalized = normalizeGammaMarket({ event, market });
-
-          if (!normalized.market) {
-            incrementReason(skipSummary, normalized.skipReason ?? "not_btc_5m_family");
-            continue;
-          }
-
-          discoveredMarkets.push(normalized.market);
-          seenSlugs.add(normalized.market.slug);
-        }
-      }
-
-      if (!page.nextCursor || page.events.length === 0) {
-        cursor = page.nextCursor;
-        break;
-      }
-
-      cursor = page.nextCursor;
-    }
-
-    const upsertResult = await ctx.runMutation(
-      internal.internal.discovery.upsertDiscoveredMarkets,
-      { markets: discoveredMarkets },
-    );
-    const staleResult = await ctx.runMutation(
-      internal.internal.discovery.markEndedMarketsInactive,
-      { seenSlugs: [...seenSlugs], nowTs: Date.now() },
-    );
-
-    if (discoveredMarkets.length === 0 || skipSummary.missing_outcome_token_mapping > 0) {
-      console.warn("[discovery] sync summary", {
-        discoveredCount: discoveredMarkets.length,
-        fetchedEvents,
-        pageCount,
-        retriesUsed,
-        skipSummary,
-      });
-    } else {
-      console.log("[discovery] sync summary", {
-        discoveredCount: discoveredMarkets.length,
-        fetchedEvents,
-        pageCount,
-        retriesUsed,
-        skipSummary,
-      });
-    }
-
-    return {
-      fetchedEvents,
-      discoveredCount: discoveredMarkets.length,
-      pagesProcessed: pageCount,
-      nextCursor: cursor,
-      retriesUsed,
-      skipSummary,
-      ...upsertResult,
-      ...staleResult,
-    };
+export const syncActiveEth5mMarkets = internalAction({
+  args: {
+    limit: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await syncActiveCryptoAssetMarkets(ctx, {
+      asset: CRYPTO_ASSETS.ETH,
+      limit: Math.max(1, Math.min(args.limit ?? 200, 500)),
+      maxPages: Math.max(1, Math.min(args.maxPages ?? 10, 25)),
+    });
   },
 });
 
@@ -406,10 +481,11 @@ export const backfillBtcFiveMinuteMarkets = internalAction({
     let fetchedEvents = 0;
     let retriesUsed = 0;
     const discoveredMarkets = [];
-    const skipSummary = createSkipSummary();
+    const skipSummary = createSkipSummary(CRYPTO_ASSETS.BTC);
 
     while (pageCount < pages) {
       const page = await fetchGammaEventsPage({
+        asset: CRYPTO_ASSETS.BTC,
         cursor,
         limit,
         statusFilter: "all",
@@ -421,7 +497,11 @@ export const backfillBtcFiveMinuteMarkets = internalAction({
 
       for (const event of page.events) {
         for (const market of Array.isArray(event.markets) ? event.markets : []) {
-          const normalized = normalizeGammaMarket({ event, market });
+          const normalized = normalizeGammaMarket({
+            asset: CRYPTO_ASSETS.BTC,
+            event,
+            market,
+          });
 
           if (normalized.market) {
             discoveredMarkets.push(normalized.market);
@@ -464,72 +544,109 @@ export const backfillBtcFiveMinuteMarkets = internalAction({
   },
 });
 
+async function syncClosedCrypto5mMarketsBySlugImpl(ctx, { asset = null, slugs }) {
+  const uniqueSlugs = [
+    ...new Set(slugs.filter((slug) => slug && slug.trim() !== "")),
+  ].slice(0, 100);
+  let fetchedEvents = 0;
+  let missingSlugs = 0;
+  let retriesUsed = 0;
+  const discoveredMarkets = [];
+  const skipSummary = createSkipSummary(asset ?? "crypto");
+
+  for (const slug of uniqueSlugs) {
+    const page = await fetchGammaEventsPage({
+      asset: asset ?? CRYPTO_ASSETS.BTC,
+      limit: 5,
+      slug,
+      statusFilter: "all",
+    });
+    fetchedEvents += page.events.length;
+    retriesUsed += page.retriesUsed;
+
+    if (page.events.length === 0) {
+      missingSlugs += 1;
+      continue;
+    }
+
+    for (const event of page.events) {
+      for (const market of Array.isArray(event.markets) ? event.markets : []) {
+        const normalized = normalizeGammaMarket({ asset, event, market });
+
+        if (!normalized.market) {
+          incrementReason(
+            skipSummary,
+            normalized.skipReason ?? (asset ? `not_${asset}_5m_family` : "not_crypto_5m_family"),
+          );
+          continue;
+        }
+
+        discoveredMarkets.push(normalized.market);
+      }
+    }
+  }
+
+  const upsertResult = await ctx.runMutation(
+    internal.internal.discovery.upsertDiscoveredMarkets,
+    { markets: discoveredMarkets },
+  );
+
+  console.log("[discovery] closed sync summary", {
+    asset,
+    discoveredCount: discoveredMarkets.length,
+    fetchedEvents,
+    missingSlugs,
+    retriesUsed,
+    slugCount: uniqueSlugs.length,
+    skipSummary,
+  });
+
+  return {
+    asset,
+    fetchedEvents,
+    discoveredCount: discoveredMarkets.length,
+    missingSlugs,
+    retriesUsed,
+    skipSummary,
+    slugCount: uniqueSlugs.length,
+    ...upsertResult,
+  };
+}
+
+export const syncClosedCrypto5mMarketsBySlug = internalAction({
+  args: {
+    asset: v.optional(v.union(v.literal("btc"), v.literal("eth"))),
+    slugs: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await syncClosedCrypto5mMarketsBySlugImpl(ctx, {
+      asset: args.asset ?? null,
+      slugs: args.slugs,
+    });
+  },
+});
+
 export const syncClosedBtc5mMarketsBySlug = internalAction({
   args: {
     slugs: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    const slugs = [...new Set(args.slugs.filter((slug) => slug && slug.trim() !== ""))].slice(
-      0,
-      100,
-    );
-    let fetchedEvents = 0;
-    let missingSlugs = 0;
-    let retriesUsed = 0;
-    const discoveredMarkets = [];
-    const skipSummary = createSkipSummary();
-
-    for (const slug of slugs) {
-      const page = await fetchGammaEventsPage({
-        limit: 5,
-        slug,
-        statusFilter: "all",
-      });
-      fetchedEvents += page.events.length;
-      retriesUsed += page.retriesUsed;
-
-      if (page.events.length === 0) {
-        missingSlugs += 1;
-        continue;
-      }
-
-      for (const event of page.events) {
-        for (const market of Array.isArray(event.markets) ? event.markets : []) {
-          const normalized = normalizeGammaMarket({ event, market });
-
-          if (!normalized.market) {
-            incrementReason(skipSummary, normalized.skipReason ?? "not_btc_5m_family");
-            continue;
-          }
-
-          discoveredMarkets.push(normalized.market);
-        }
-      }
-    }
-
-    const upsertResult = await ctx.runMutation(
-      internal.internal.discovery.upsertDiscoveredMarkets,
-      { markets: discoveredMarkets },
-    );
-
-    console.log("[discovery] closed sync summary", {
-      discoveredCount: discoveredMarkets.length,
-      fetchedEvents,
-      missingSlugs,
-      retriesUsed,
-      slugCount: slugs.length,
-      skipSummary,
+    return await syncClosedCrypto5mMarketsBySlugImpl(ctx, {
+      asset: CRYPTO_ASSETS.BTC,
+      slugs: args.slugs,
     });
+  },
+});
 
-    return {
-      fetchedEvents,
-      discoveredCount: discoveredMarkets.length,
-      missingSlugs,
-      retriesUsed,
-      skipSummary,
-      slugCount: slugs.length,
-      ...upsertResult,
-    };
+export const syncClosedEth5mMarketsBySlug = internalAction({
+  args: {
+    slugs: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await syncClosedCrypto5mMarketsBySlugImpl(ctx, {
+      asset: CRYPTO_ASSETS.ETH,
+      slugs: args.slugs,
+    });
   },
 });
 
@@ -537,6 +654,7 @@ export const upsertDiscoveredMarkets = internalMutation({
   args: {
     markets: v.array(
       v.object({
+        asset: v.optional(v.union(v.literal("btc"), v.literal("eth"))),
         slug: v.string(),
         marketId: v.string(),
         conditionId: v.union(v.string(), v.null()),
@@ -626,10 +744,12 @@ export const upsertDiscoveredMarkets = internalMutation({
 
 export const markEndedMarketsInactive = internalMutation({
   args: {
+    asset: v.optional(v.union(v.literal("btc"), v.literal("eth"))),
     seenSlugs: v.array(v.string()),
     nowTs: v.number(),
   },
   handler: async (ctx, args) => {
+    const asset = args.asset ?? CRYPTO_ASSETS.BTC;
     const seenSlugs = new Set(args.seenSlugs);
     const endedBeforeTs = args.nowTs - 60_000;
     const activeMarkets = await ctx.db
@@ -641,6 +761,10 @@ export const markEndedMarketsInactive = internalMutation({
     let deactivated = 0;
 
     for (const market of activeMarkets) {
+      if (getStoredMarketAsset(market) !== asset) {
+        continue;
+      }
+
       if (seenSlugs.has(market.slug)) {
         continue;
       }

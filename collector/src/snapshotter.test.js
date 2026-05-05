@@ -130,6 +130,98 @@ test("buildMarketSnapshots stores timing for final 10 second forensics only", ()
   assert.equal(snapshot.btcBinanceReceivedAgeMs, 250);
 });
 
+test("buildMarketSnapshots stores ETH prices and uses ETH freshness for ETH markets", () => {
+  const [snapshot] = buildMarketSnapshots({
+    markets: [
+      {
+        ...baseMarket,
+        asset: "eth",
+        slug: "eth-updown-5m-test",
+      },
+    ],
+    marketData: {
+      booksByTokenId: new Map(),
+      endpointErrors: [],
+      lastTradesByTokenId: new Map(),
+      midpointsByTokenId: new Map([
+        ["up-token", "0.52"],
+        ["down-token", "0.48"],
+      ]),
+    },
+    latestTicks: new Map([
+      [
+        "chainlink:btc/usd",
+        {
+          price: 74500,
+          receivedAt: nowTs - 1000,
+          source: "chainlink",
+          symbol: "btc/usd",
+        },
+      ],
+      [
+        "chainlink:eth/usd",
+        {
+          price: 3450,
+          receivedAt: nowTs - 1000,
+          source: "chainlink",
+          symbol: "eth/usd",
+        },
+      ],
+      [
+        "binance:ethusdt",
+        {
+          price: 3451,
+          receivedAt: nowTs - 1000,
+          source: "binance",
+          symbol: "ethusdt",
+        },
+      ],
+    ]),
+    nowTs,
+  });
+
+  assert.equal(snapshot.asset, "eth");
+  assert.equal(snapshot.btcChainlink, 74500);
+  assert.equal(snapshot.ethChainlink, 3450);
+  assert.equal(snapshot.ethBinance, 3451);
+  assert.equal(snapshot.sourceQuality, SNAPSHOT_QUALITY.GOOD);
+});
+
+test("buildMarketSnapshots marks ETH market stale when ETH Chainlink is stale", () => {
+  const [snapshot] = buildMarketSnapshots({
+    markets: [
+      {
+        ...baseMarket,
+        asset: "eth",
+        slug: "eth-updown-5m-test",
+      },
+    ],
+    marketData: {
+      booksByTokenId: new Map(),
+      endpointErrors: [],
+      lastTradesByTokenId: new Map(),
+      midpointsByTokenId: new Map([
+        ["up-token", "0.52"],
+        ["down-token", "0.48"],
+      ]),
+    },
+    latestTicks: new Map([
+      [
+        "chainlink:btc/usd",
+        {
+          price: 74500,
+          receivedAt: nowTs - 1000,
+          source: "chainlink",
+          symbol: "btc/usd",
+        },
+      ],
+    ]),
+    nowTs,
+  });
+
+  assert.equal(snapshot.sourceQuality, SNAPSHOT_QUALITY.STALE_BTC);
+});
+
 test("buildMarketSnapshots marks empty market data as gap instead of disappearing", () => {
   const [snapshot] = buildMarketSnapshots({
     markets: [baseMarket],

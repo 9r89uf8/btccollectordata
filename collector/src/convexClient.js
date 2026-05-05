@@ -57,7 +57,9 @@ export function createQueryClient(config) {
   return {
     client,
     async listActiveMarkets() {
-      return await client.query("markets:listActiveBtc5m", {});
+      return await client.query("markets:listActiveCrypto5m", {
+        assets: config.cryptoAssets,
+      });
     },
   };
 }

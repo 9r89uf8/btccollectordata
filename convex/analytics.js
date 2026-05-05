@@ -13,9 +13,9 @@ async function getRollup(ctx) {
     .unique();
 }
 
-function fromRollup(rollup) {
+function fromRollup(rollup, { includeLeader = false } = {}) {
   if (!rollup) {
-    return {
+    const emptyDashboard = {
       ...buildAnalyticsDashboard({
         analyticsRows: [],
         stabilityRows: [],
@@ -24,17 +24,30 @@ function fromRollup(rollup) {
       rollupMode: "empty",
       rowLimits: null,
     };
+
+    if (!includeLeader) {
+      const { leader: _leader, ...dashboardWithoutLeader } = emptyDashboard;
+
+      return dashboardWithoutLeader;
+    }
+
+    return emptyDashboard;
   }
 
-  return {
+  const dashboard = {
     computedAt: rollup.computedAt,
     health: rollup.v1?.health,
-    leader: rollup.v1?.leader,
     marketCountsByDay: rollup.v3?.marketCountsByDay ?? [],
     rollupMode: rollup.v3?.rollupMode ?? "unknown",
     rowLimits: rollup.v3?.rowLimits ?? null,
     stability: rollup.v2?.stability,
   };
+
+  if (includeLeader) {
+    dashboard.leader = rollup.v1?.leader;
+  }
+
+  return dashboard;
 }
 
 export const getDashboard = query({
@@ -124,6 +137,6 @@ export const listExcludedMarkets = query({
 export const getLeaderAndDistance = query({
   args: {},
   handler: async (ctx) => {
-    return fromRollup(await getRollup(ctx)).leader;
+    return fromRollup(await getRollup(ctx), { includeLeader: true }).leader;
   },
 });

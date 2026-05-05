@@ -13,6 +13,11 @@ import {
   shouldFinalizeMissingSummary,
   shouldMarkMarketStaleActive,
 } from "../../packages/shared/src/repair.js";
+import { CRYPTO_ASSETS } from "../../packages/shared/src/ingest.js";
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 export const listStaleActiveMarketSlugs = internalQuery({
   args: {
@@ -32,6 +37,7 @@ export const listStaleActiveMarketSlugs = internalQuery({
       .collect();
 
     return activeMarkets
+      .filter(isBtcMarket)
       .filter((market) => shouldMarkMarketStaleActive(market, { graceMs, nowTs }))
       .sort((a, b) => a.windowEndTs - b.windowEndTs)
       .slice(0, limit)
@@ -108,6 +114,10 @@ export const listMissingSummarySlugs = internalQuery({
       }
 
       for (const market of page) {
+        if (!isBtcMarket(market)) {
+          continue;
+        }
+
         if (
           !shouldFinalizeMissingSummary(market, {
             graceMs,

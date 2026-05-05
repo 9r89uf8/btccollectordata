@@ -2,7 +2,11 @@ import { v } from "convex/values";
 
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation } from "../_generated/server";
-import { BTC_SOURCES, BTC_SYMBOLS } from "../../packages/shared/src/ingest.js";
+import {
+  BTC_SOURCES,
+  BTC_SYMBOLS,
+  CRYPTO_ASSETS,
+} from "../../packages/shared/src/ingest.js";
 import {
   ANALYTICS_VERSION,
   EXCLUDED_REASONS,
@@ -17,6 +21,10 @@ const RETRYABLE_EXCLUDED_REASONS = new Set([
 ]);
 const MIN_MATERIALIZE_LOOKBACK_MS = 5 * 60_000;
 const MAX_MATERIALIZE_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 async function getMarketBySlug(ctx, slug) {
   return await ctx.db
@@ -117,6 +125,13 @@ export async function materializeMarketAnalyticsForSlug(
     };
   }
 
+  if (!isBtcMarket(market)) {
+    return {
+      slug,
+      status: "skipped_unsupported_asset",
+    };
+  }
+
   const [summary, btcTicks] = await Promise.all([
     getSummaryByMarketSlug(ctx, slug),
     getChainlinkBtcTicksForMarket(ctx, market),
@@ -196,6 +211,12 @@ export const materializeMissingOrStale = internalMutation({
 
       for (const market of page) {
         scanned += 1;
+
+        if (!isBtcMarket(market)) {
+          skipped += 1;
+          continue;
+        }
+
         const existing = await getAnalyticsByMarketSlug(ctx, market.slug);
 
         if (!shouldMaterializeMarketAnalytics({ existing, market, nowTs })) {

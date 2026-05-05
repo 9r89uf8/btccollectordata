@@ -1,9 +1,11 @@
 import process from "node:process";
 
 import {
-  BTC_SOURCES,
+  CRYPTO_ASSETS,
   COLLECTOR_STATUS,
   INGEST_MAX_BATCH_ITEMS,
+  PRICE_SOURCES,
+  getCryptoAssetForSymbol,
 } from "../../packages/shared/src/ingest.js";
 import { CAPTURE_MODES } from "../../packages/shared/src/market.js";
 import { fetchClobMarketData } from "./clob.js";
@@ -29,6 +31,10 @@ if (typeof WebSocket !== "function") {
 
 function dedupeKeyForTick(tick) {
   return `${tick.source}:${tick.symbol}:${tick.ts}`;
+}
+
+function latestTickKey(tick) {
+  return `${tick.source}:${tick.symbol}`;
 }
 
 function dedupeKeyForSnapshot(snapshot) {
@@ -135,6 +141,7 @@ async function main() {
     lastWsSnapshotAt: null,
     latestBinanceTick: null,
     latestChainlinkTick: null,
+    latestTicksByKey: new Map(),
     marketInfoByAssetId: new Map(),
     marketRefreshInFlight: false,
     marketWsConnected: false,
@@ -227,14 +234,20 @@ async function main() {
 
   function queueBtcTick(tick) {
     pendingTicks.set(dedupeKeyForTick(tick), tick);
+    state.latestTicksByKey.set(latestTickKey(tick), tick);
 
-    if (tick.source === BTC_SOURCES.CHAINLINK) {
+    const asset = getCryptoAssetForSymbol({
+      source: tick.source,
+      symbol: tick.symbol,
+    });
+
+    if (asset === CRYPTO_ASSETS.BTC && tick.source === PRICE_SOURCES.CHAINLINK) {
       state.latestChainlinkTick = tick;
       state.lastBtcTickAt = tick.ts;
       return;
     }
 
-    if (tick.source === BTC_SOURCES.BINANCE) {
+    if (asset === CRYPTO_ASSETS.BTC && tick.source === PRICE_SOURCES.BINANCE) {
       state.latestBinanceTick = tick;
     }
   }
@@ -257,6 +270,7 @@ async function main() {
     const gapSnapshots = buildMarketSnapshots({
       latestBinanceTick: state.latestBinanceTick,
       latestChainlinkTick: state.latestChainlinkTick,
+      latestTicks: state.latestTicksByKey,
       marketData: createEmptyMarketData(),
       markets,
       nowTs,
@@ -540,6 +554,7 @@ async function main() {
         pollSnapshots = buildMarketSnapshots({
           latestBinanceTick: state.latestBinanceTick,
           latestChainlinkTick: state.latestChainlinkTick,
+          latestTicks: state.latestTicksByKey,
           marketData: pollMarketData,
           markets: pollMarkets,
           nowTs,
@@ -560,6 +575,7 @@ async function main() {
         ? buildMarketSnapshots({
             latestBinanceTick: state.latestBinanceTick,
             latestChainlinkTick: state.latestChainlinkTick,
+            latestTicks: state.latestTicksByKey,
             marketData: marketStateStore.buildMarketData(),
             markets: pollMarkets,
             nowTs,
@@ -690,6 +706,7 @@ async function main() {
     batchMs: config.collectorBatchMs,
     clobBase: config.polymarketClobBase,
     collectorName: config.collectorName,
+    cryptoAssets: config.cryptoAssets,
     enableMarketWs: config.enableMarketWs,
     persistMarketRawEvents: config.persistMarketRawEvents,
     marketConnectTimeoutMs: config.marketConnectTimeoutMs,

@@ -6,6 +6,8 @@ import { loadCollectorConfig } from "./config.js";
 const ENV_KEYS = [
   "CONVEX_URL",
   "CONVEX_SITE_URL",
+  "COLLECT_CRYPTO_ASSETS",
+  "CRYPTO_ASSETS",
   "INGEST_SHARED_SECRET",
 ];
 
@@ -44,6 +46,23 @@ test("loadCollectorConfig reads explicit Convex site URL from env", () => {
       const config = loadCollectorConfig();
 
       assert.equal(config.convexSiteUrl, "https://example.convex.site");
+      assert.deepEqual(config.cryptoAssets, ["btc", "eth"]);
+    },
+  );
+});
+
+test("loadCollectorConfig parses crypto asset collection list", () => {
+  withEnv(
+    {
+      COLLECT_CRYPTO_ASSETS: "eth",
+      CONVEX_URL: "https://example.convex.cloud",
+      CONVEX_SITE_URL: "https://example.convex.site",
+      INGEST_SHARED_SECRET: "test-secret",
+    },
+    () => {
+      const config = loadCollectorConfig();
+
+      assert.deepEqual(config.cryptoAssets, ["eth"]);
     },
   );
 });

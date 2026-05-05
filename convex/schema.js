@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 const nullable = (value) => v.union(value, v.null());
 const optionalNullable = (value) => v.optional(v.union(value, v.null()));
+const cryptoAssetValue = v.union(v.literal("btc"), v.literal("eth"));
 const outcomeValue = v.union(v.literal("up"), v.literal("down"));
 const legacyDecisionActionValue = v.union(
   v.literal("WAIT"),
@@ -61,6 +62,7 @@ const pathTypeValue = v.union(
 
 export default defineSchema({
   markets: defineTable({
+    asset: v.optional(cryptoAssetValue),
     slug: v.string(),
     marketId: v.string(),
     conditionId: nullable(v.string()),
@@ -136,6 +138,7 @@ export default defineSchema({
     .index("by_eventType_ts", ["eventType", "ts"]),
 
   market_snapshots_1s: defineTable({
+    asset: v.optional(cryptoAssetValue),
     marketSlug: v.string(),
     marketId: v.string(),
     ts: v.number(),
@@ -173,12 +176,20 @@ export default defineSchema({
     ),
     btcChainlink: nullable(v.number()),
     btcBinance: nullable(v.number()),
+    ethChainlink: optionalNullable(v.number()),
+    ethBinance: optionalNullable(v.number()),
     btcChainlinkTs: optionalNullable(v.number()),
     btcChainlinkReceivedAt: optionalNullable(v.number()),
     btcChainlinkReceivedAgeMs: optionalNullable(v.number()),
     btcBinanceTs: optionalNullable(v.number()),
     btcBinanceReceivedAt: optionalNullable(v.number()),
     btcBinanceReceivedAgeMs: optionalNullable(v.number()),
+    ethChainlinkTs: optionalNullable(v.number()),
+    ethChainlinkReceivedAt: optionalNullable(v.number()),
+    ethChainlinkReceivedAgeMs: optionalNullable(v.number()),
+    ethBinanceTs: optionalNullable(v.number()),
+    ethBinanceReceivedAt: optionalNullable(v.number()),
+    ethBinanceReceivedAgeMs: optionalNullable(v.number()),
     marketImbalance: nullable(v.number()),
     sourceQuality: snapshotQualityValue,
     writtenAt: v.number(),

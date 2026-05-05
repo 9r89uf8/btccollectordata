@@ -1,12 +1,13 @@
 # BTC Collector Data
 
-Polymarket BTC 5-minute market tracker backed by Convex.
+Polymarket BTC 5-minute market tracker backed by Convex. The collector can also
+capture ETH 5-minute market snapshots for research context.
 
 ## Architecture
 
 - The web app reads market, snapshot, summary, and health data from Convex.
 - The long-running collector connects to:
-  - Polymarket RTDS for Chainlink BTC ticks
+  - Polymarket RTDS for Chainlink BTC/ETH ticks
   - Polymarket CLOB HTTP endpoints for market polling snapshots
   - Polymarket market WebSocket for shadow capture and parity checks
 - The collector writes batches into Convex through the ingest route.
@@ -56,6 +57,7 @@ Collector:
 - `CONVEX_URL`
 - `CONVEX_SITE_URL`
 - `INGEST_SHARED_SECRET`
+- `COLLECT_CRYPTO_ASSETS` (`btc,eth` by default)
 - `SNAPSHOT_POLL_MS`
 - `PERSIST_MARKET_RAW_EVENTS`
 

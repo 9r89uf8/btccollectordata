@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DEFAULT_COLLECTOR_NAME } from "../../packages/shared/src/ingest.js";
+import {
+  DEFAULT_COLLECTOR_NAME,
+  DEFAULT_CRYPTO_ASSETS,
+  normalizeCryptoAssets,
+} from "../../packages/shared/src/ingest.js";
 import { FINAL_FORENSICS_WINDOW_MS } from "../../packages/shared/src/snapshot.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -100,6 +104,10 @@ function toBoolean(value, fallback = false) {
   return fallback;
 }
 
+function toCryptoAssets(value, fallback = DEFAULT_CRYPTO_ASSETS) {
+  return normalizeCryptoAssets(value, fallback);
+}
+
 export function deriveConvexSiteUrl(convexUrl) {
   if (typeof convexUrl !== "string" || convexUrl.trim() === "") {
     return null;
@@ -132,6 +140,13 @@ export function loadCollectorConfig() {
 
   const config = {
     collectorName: readEnv("COLLECTOR_NAME", DEFAULT_COLLECTOR_NAME, fileEnv),
+    cryptoAssets: toCryptoAssets(
+      readEnv(
+        "COLLECT_CRYPTO_ASSETS",
+        readEnv("CRYPTO_ASSETS", DEFAULT_CRYPTO_ASSETS.join(","), fileEnv),
+        fileEnv,
+      ),
+    ),
     convexUrl,
     convexSiteUrl,
     ingestSharedSecret: readEnv("INGEST_SHARED_SECRET", null, fileEnv),

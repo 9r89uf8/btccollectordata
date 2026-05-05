@@ -1,3 +1,5 @@
+import { CRYPTO_ASSETS, normalizeCryptoAsset } from "./ingest.js";
+
 export const MARKET_OUTCOMES = {
   UP: "up",
   DOWN: "down",
@@ -18,6 +20,25 @@ export const DATA_QUALITY = {
   PARTIAL: "partial",
   GAP: "gap",
   UNKNOWN: "unknown",
+};
+
+export const CRYPTO_FIVE_MINUTE_MARKET_FAMILIES = {
+  [CRYPTO_ASSETS.BTC]: {
+    asset: CRYPTO_ASSETS.BTC,
+    gammaTagSlug: "bitcoin",
+    resolutionSourcePattern: /data\.chain\.link\/streams\/btc-usd/i,
+    slugPrefix: "btc-updown-5m-",
+    titlePattern: /bitcoin up or down/i,
+    titleSearch: "Bitcoin Up or Down",
+  },
+  [CRYPTO_ASSETS.ETH]: {
+    asset: CRYPTO_ASSETS.ETH,
+    gammaTagSlug: "ethereum",
+    resolutionSourcePattern: /data\.chain\.link\/streams\/eth-usd/i,
+    slugPrefix: "eth-updown-5m-",
+    titlePattern: /ethereum up or down/i,
+    titleSearch: "Ethereum Up or Down",
+  },
 };
 
 const MONTH_LOOKUP = {
@@ -48,7 +69,7 @@ const MONTH_LOOKUP = {
 };
 
 const WINDOW_PATTERN =
-  /(Bitcoin Up or Down\s*-\s*)?(?<month>[A-Za-z]+)\s+(?<day>\d{1,2})(?:,\s*(?<year>\d{4}))?,\s*(?<start>\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*-\s*(?<end>\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*ET/i;
+  /((?:Bitcoin|Ethereum) Up or Down\s*-\s*)?(?<month>[A-Za-z]+)\s+(?<day>\d{1,2})(?:,\s*(?<year>\d{4}))?,\s*(?<start>\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*-\s*(?<end>\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*ET/i;
 
 export function parseGammaJsonArray(value) {
   if (Array.isArray(value)) {
@@ -124,29 +145,58 @@ export function extractOutcomeTokenMap(market) {
   };
 }
 
-export function parseBtcFiveMinuteWindowFromSlug(slug) {
+export function getCryptoFiveMinuteMarketFamily(asset) {
+  const normalized = normalizeCryptoAsset(asset);
+
+  return normalized
+    ? CRYPTO_FIVE_MINUTE_MARKET_FAMILIES[normalized] ?? null
+    : null;
+}
+
+export function parseCryptoFiveMinuteWindowFromSlug(slug, asset = null) {
   if (typeof slug !== "string") {
     return null;
   }
 
-  const match = slug.match(/^btc-updown-5m-(\d{9,})$/i);
+  const families = asset
+    ? [getCryptoFiveMinuteMarketFamily(asset)].filter(Boolean)
+    : Object.values(CRYPTO_FIVE_MINUTE_MARKET_FAMILIES);
 
-  if (!match) {
+  for (const family of families) {
+    const escapedPrefix = family.slugPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = slug.match(new RegExp(`^${escapedPrefix}(\\d{9,})$`, "i"));
+
+    if (!match) {
+      continue;
+    }
+
+    const windowStartTs = Number(match[1]) * 1000;
+
+    if (!Number.isFinite(windowStartTs)) {
+      return null;
+    }
+
+    return {
+      asset: family.asset,
+      windowStartTs,
+      windowEndTs: windowStartTs + BTC_FIVE_MINUTE_WINDOW_MS,
+      timezone: ET_TIME_ZONE,
+      source: "slug",
+    };
+  }
+
+  return null;
+}
+
+export function parseBtcFiveMinuteWindowFromSlug(slug) {
+  const parsed = parseCryptoFiveMinuteWindowFromSlug(slug, CRYPTO_ASSETS.BTC);
+
+  if (!parsed) {
     return null;
   }
 
-  const windowStartTs = Number(match[1]) * 1000;
-
-  if (!Number.isFinite(windowStartTs)) {
-    return null;
-  }
-
-  return {
-    windowStartTs,
-    windowEndTs: windowStartTs + BTC_FIVE_MINUTE_WINDOW_MS,
-    timezone: ET_TIME_ZONE,
-    source: "slug",
-  };
+  const { asset: _asset, ...window } = parsed;
+  return window;
 }
 
 function parseTimeToken(token) {
@@ -416,30 +466,60 @@ export function parseBtcFiveMinuteWindow(text, options = {}) {
 }
 
 export function deriveBtcFiveMinuteWindow(input) {
+  const parsed = deriveCryptoFiveMinuteWindow({
+    ...input,
+    asset: CRYPTO_ASSETS.BTC,
+  });
+
+  if (!parsed) {
+    return null;
+  }
+
+  const { asset: _asset, ...window } = parsed;
+  return window;
+}
+
+export function deriveCryptoFiveMinuteWindow(input) {
+  const asset = normalizeCryptoAsset(input?.asset ?? null);
   const fromText = parseBtcFiveMinuteWindow(input?.title ?? input?.question ?? "", {
     referenceTs: input?.referenceTs,
   });
-  const fromSlug = parseBtcFiveMinuteWindowFromSlug(input?.slug ?? "");
+  const fromSlug = parseCryptoFiveMinuteWindowFromSlug(input?.slug ?? "", asset);
 
   if (fromText) {
-    return fromText;
+    return {
+      ...fromText,
+      asset: asset ?? fromSlug?.asset ?? null,
+    };
   }
 
   return fromSlug;
 }
 
-export function titleLooksLikeBtcUpDown(text) {
-  return typeof text === "string" && /bitcoin up or down/i.test(text);
+export function titleLooksLikeCryptoUpDown(text, asset) {
+  const family = getCryptoFiveMinuteMarketFamily(asset);
+
+  return typeof text === "string" && Boolean(family?.titlePattern.test(text));
 }
 
-export function isChainlinkBtcResolutionSource(source) {
+export function titleLooksLikeBtcUpDown(text) {
+  return titleLooksLikeCryptoUpDown(text, CRYPTO_ASSETS.BTC);
+}
+
+export function isChainlinkCryptoResolutionSource(source, asset) {
+  const family = getCryptoFiveMinuteMarketFamily(asset);
+
   return (
     typeof source === "string" &&
-    /data\.chain\.link\/streams\/btc-usd/i.test(source)
+    Boolean(family?.resolutionSourcePattern.test(source))
   );
 }
 
-export function matchesBtcFiveMinuteFamily({ event, market }) {
+export function isChainlinkBtcResolutionSource(source) {
+  return isChainlinkCryptoResolutionSource(source, CRYPTO_ASSETS.BTC);
+}
+
+export function matchesCryptoFiveMinuteFamily({ asset = null, event, market }) {
   const slug = market?.slug ?? event?.slug ?? "";
   const title = market?.question ?? event?.title ?? "";
   const resolutionSource =
@@ -451,26 +531,53 @@ export function matchesBtcFiveMinuteFamily({ event, market }) {
       event?.endDate ??
       "",
   );
-  const parsedWindow = deriveBtcFiveMinuteWindow({
-    slug,
-    title,
-    referenceTs,
-  });
+  const familyCandidates = asset
+    ? [getCryptoFiveMinuteMarketFamily(asset)].filter(Boolean)
+    : Object.values(CRYPTO_FIVE_MINUTE_MARKET_FAMILIES);
 
-  const slugMatch = /^btc-updown-5m-/i.test(slug);
-  const titleMatch = titleLooksLikeBtcUpDown(title) && Boolean(parsedWindow);
-  const resolutionMatch =
-    isChainlinkBtcResolutionSource(resolutionSource) && Boolean(parsedWindow);
+  for (const family of familyCandidates) {
+    const parsedWindow = deriveCryptoFiveMinuteWindow({
+      asset: family.asset,
+      slug,
+      title,
+      referenceTs,
+    });
+    const escapedPrefix = family.slugPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const slugMatch = new RegExp(`^${escapedPrefix}`, "i").test(slug);
+    const titleMatch =
+      titleLooksLikeCryptoUpDown(title, family.asset) && Boolean(parsedWindow);
+    const resolutionMatch =
+      isChainlinkCryptoResolutionSource(resolutionSource, family.asset) &&
+      Boolean(parsedWindow);
+
+    if (!slugMatch && !titleMatch && !resolutionMatch) {
+      continue;
+    }
+
+    return {
+      asset: family.asset,
+      matches: true,
+      parsedWindow,
+      matchReason: slugMatch
+        ? "slug"
+        : titleMatch
+          ? "title"
+          : "resolution_source",
+    };
+  }
 
   return {
-    matches: Boolean(slugMatch || titleMatch || resolutionMatch),
-    parsedWindow,
-    matchReason: slugMatch
-      ? "slug"
-      : titleMatch
-        ? "title"
-        : resolutionMatch
-          ? "resolution_source"
-          : null,
+    asset: null,
+    matches: false,
+    parsedWindow: null,
+    matchReason: null,
   };
+}
+
+export function matchesBtcFiveMinuteFamily({ event, market }) {
+  return matchesCryptoFiveMinuteFamily({
+    asset: CRYPTO_ASSETS.BTC,
+    event,
+    market,
+  });
 }

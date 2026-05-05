@@ -62,7 +62,7 @@ async function withFakeWebSocket(fn) {
   }
 }
 
-test("startRtdsClient sends Binance filters as JSON when context is enabled", async () => {
+test("startRtdsClient subscribes to BTC and ETH Chainlink and Binance feeds", async () => {
   await withFakeWebSocket(async () => {
     const client = startRtdsClient({
       config: BASE_CONFIG,
@@ -76,13 +76,67 @@ test("startRtdsClient sends Binance filters as JSON when context is enabled", as
 
     const message = JSON.parse(socket.sent[0]);
 
-    assert.equal(message.subscriptions.length, 2);
+    assert.equal(message.subscriptions.length, 3);
     assert.deepEqual(JSON.parse(message.subscriptions[0].filters), {
       symbol: "btc/usd",
     });
     assert.deepEqual(JSON.parse(message.subscriptions[1].filters), {
-      symbol: "btcusdt",
+      symbol: "eth/usd",
     });
+    assert.equal(message.subscriptions[2].filters, "btcusdt,ethusdt");
+
+    client.stop();
+  });
+});
+
+test("startRtdsClient emits ETH ticks from Chainlink and Binance messages", async () => {
+  await withFakeWebSocket(async () => {
+    const ticks = [];
+    const client = startRtdsClient({
+      config: BASE_CONFIG,
+      onError: () => {},
+      onStateChange: () => {},
+      onTick: (tick) => ticks.push(tick),
+    });
+    const socket = FakeWebSocket.instances[0];
+
+    socket.emit("open");
+    socket.emit("message", {
+      data: JSON.stringify([
+        {
+          topic: "crypto_prices_chainlink",
+          type: "update",
+          timestamp: 1770000000000,
+          payload: {
+            symbol: "eth/usd",
+            timestamp: 1770000000000,
+            value: 3456.78,
+          },
+        },
+        {
+          topic: "crypto_prices",
+          type: "update",
+          timestamp: 1770000001000,
+          payload: {
+            symbol: "ethusdt",
+            timestamp: 1770000001000,
+            value: 3457.12,
+          },
+        },
+      ]),
+    });
+
+    assert.deepEqual(
+      ticks.map((tick) => ({
+        price: tick.price,
+        source: tick.source,
+        symbol: tick.symbol,
+      })),
+      [
+        { price: 3456.78, source: "chainlink", symbol: "eth/usd" },
+        { price: 3457.12, source: "binance", symbol: "ethusdt" },
+      ],
+    );
 
     client.stop();
   });

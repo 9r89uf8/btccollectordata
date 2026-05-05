@@ -1,4 +1,9 @@
 import {
+  CRYPTO_ASSETS,
+  CRYPTO_SYMBOLS_BY_ASSET,
+  PRICE_SOURCES,
+} from "../../packages/shared/src/ingest.js";
+import {
   BOOK_STALE_MS,
   BTC_STALE_MS,
   FINAL_FORENSICS_WINDOW_MS,
@@ -36,6 +41,62 @@ function getTopLevel(levels) {
 
 function ageMs(ts, nowTs) {
   return Number.isFinite(ts) ? nowTs - ts : null;
+}
+
+function getMarketAsset(market) {
+  return Object.values(CRYPTO_ASSETS).includes(market?.asset)
+    ? market.asset
+    : CRYPTO_ASSETS.BTC;
+}
+
+function latestTickKey(source, symbol) {
+  return `${source}:${symbol}`;
+}
+
+function getLatestTick({ fallbackTick = null, latestTicks, source, symbol }) {
+  if (latestTicks instanceof Map) {
+    return latestTicks.get(latestTickKey(source, symbol)) ?? fallbackTick;
+  }
+
+  if (latestTicks && typeof latestTicks === "object") {
+    return latestTicks[latestTickKey(source, symbol)] ?? fallbackTick;
+  }
+
+  return fallbackTick;
+}
+
+function getTickContext({
+  latestBinanceTick,
+  latestChainlinkTick,
+  latestTicks,
+}) {
+  const btcSymbols = CRYPTO_SYMBOLS_BY_ASSET[CRYPTO_ASSETS.BTC];
+  const ethSymbols = CRYPTO_SYMBOLS_BY_ASSET[CRYPTO_ASSETS.ETH];
+
+  return {
+    btcBinanceTick: getLatestTick({
+      fallbackTick: latestBinanceTick,
+      latestTicks,
+      source: PRICE_SOURCES.BINANCE,
+      symbol: btcSymbols[PRICE_SOURCES.BINANCE],
+    }),
+    btcChainlinkTick: getLatestTick({
+      fallbackTick: latestChainlinkTick,
+      latestTicks,
+      source: PRICE_SOURCES.CHAINLINK,
+      symbol: btcSymbols[PRICE_SOURCES.CHAINLINK],
+    }),
+    ethBinanceTick: getLatestTick({
+      latestTicks,
+      source: PRICE_SOURCES.BINANCE,
+      symbol: ethSymbols[PRICE_SOURCES.BINANCE],
+    }),
+    ethChainlinkTick: getLatestTick({
+      latestTicks,
+      source: PRICE_SOURCES.CHAINLINK,
+      symbol: ethSymbols[PRICE_SOURCES.CHAINLINK],
+    }),
+  };
 }
 
 function isFinalForensicsSnapshot(secondBucket, market) {
@@ -92,7 +153,12 @@ function buildOutcomeMarketView(
   };
 }
 
-function deriveSourceQuality({ upView, downView, latestChainlinkTick, nowTs }) {
+function deriveSourceQuality({
+  downView,
+  nowTs,
+  referenceChainlinkTick,
+  upView,
+}) {
   if (upView.displayedPrice === null || downView.displayedPrice === null) {
     return SNAPSHOT_QUALITY.GAP;
   }
@@ -105,8 +171,8 @@ function deriveSourceQuality({ upView, downView, latestChainlinkTick, nowTs }) {
     return SNAPSHOT_QUALITY.STALE_BOOK;
   }
 
-  const chainlinkFresh = latestChainlinkTick
-    ? !isSourceStale(latestChainlinkTick.receivedAt, nowTs, BTC_STALE_MS)
+  const chainlinkFresh = referenceChainlinkTick
+    ? !isSourceStale(referenceChainlinkTick.receivedAt, nowTs, BTC_STALE_MS)
     : false;
 
   if (!chainlinkFresh) {
@@ -125,28 +191,40 @@ function deriveMarketImbalance(upDisplayed, downDisplayed) {
 }
 
 function buildFinalForensicsFields({
+  btcBinanceTick,
+  btcChainlinkTick,
   downView,
-  latestBinanceTick,
-  latestChainlinkTick,
+  ethBinanceTick,
+  ethChainlinkTick,
   nowTs,
   upView,
 }) {
-  const chainlinkTs = toFiniteNumber(latestChainlinkTick?.ts);
-  const chainlinkReceivedAt = toFiniteNumber(latestChainlinkTick?.receivedAt);
-  const binanceTs = toFiniteNumber(latestBinanceTick?.ts);
-  const binanceReceivedAt = toFiniteNumber(latestBinanceTick?.receivedAt);
+  const btcChainlinkTs = toFiniteNumber(btcChainlinkTick?.ts);
+  const btcChainlinkReceivedAt = toFiniteNumber(btcChainlinkTick?.receivedAt);
+  const btcBinanceTs = toFiniteNumber(btcBinanceTick?.ts);
+  const btcBinanceReceivedAt = toFiniteNumber(btcBinanceTick?.receivedAt);
+  const ethChainlinkTs = toFiniteNumber(ethChainlinkTick?.ts);
+  const ethChainlinkReceivedAt = toFiniteNumber(ethChainlinkTick?.receivedAt);
+  const ethBinanceTs = toFiniteNumber(ethBinanceTick?.ts);
+  const ethBinanceReceivedAt = toFiniteNumber(ethBinanceTick?.receivedAt);
 
   return {
-    btcBinanceReceivedAgeMs: ageMs(binanceReceivedAt, nowTs),
-    btcBinanceReceivedAt: binanceReceivedAt,
-    btcBinanceTs: binanceTs,
-    btcChainlinkReceivedAgeMs: ageMs(chainlinkReceivedAt, nowTs),
-    btcChainlinkReceivedAt: chainlinkReceivedAt,
-    btcChainlinkTs: chainlinkTs,
+    btcBinanceReceivedAgeMs: ageMs(btcBinanceReceivedAt, nowTs),
+    btcBinanceReceivedAt: btcBinanceReceivedAt,
+    btcBinanceTs: btcBinanceTs,
+    btcChainlinkReceivedAgeMs: ageMs(btcChainlinkReceivedAt, nowTs),
+    btcChainlinkReceivedAt: btcChainlinkReceivedAt,
+    btcChainlinkTs: btcChainlinkTs,
     downBookAgeMs: ageMs(downView.quoteTs, nowTs),
     downBookTs: downView.quoteTs,
     downLastAgeMs: ageMs(downView.lastTs, nowTs),
     downLastTs: downView.lastTs,
+    ethBinanceReceivedAgeMs: ageMs(ethBinanceReceivedAt, nowTs),
+    ethBinanceReceivedAt: ethBinanceReceivedAt,
+    ethBinanceTs: ethBinanceTs,
+    ethChainlinkReceivedAgeMs: ageMs(ethChainlinkReceivedAt, nowTs),
+    ethChainlinkReceivedAt: ethChainlinkReceivedAt,
+    ethChainlinkTs: ethChainlinkTs,
     upBookAgeMs: ageMs(upView.quoteTs, nowTs),
     upBookTs: upView.quoteTs,
     upLastAgeMs: ageMs(upView.lastTs, nowTs),
@@ -159,12 +237,23 @@ export function buildMarketSnapshots({
   marketData,
   latestChainlinkTick,
   latestBinanceTick,
+  latestTicks,
   nowTs = Date.now(),
 }) {
   const secondBucket = getSnapshotSecondBucket(nowTs);
   const snapshots = [];
+  const tickContext = getTickContext({
+    latestBinanceTick,
+    latestChainlinkTick,
+    latestTicks,
+  });
 
   for (const market of markets) {
+    const asset = getMarketAsset(market);
+    const referenceChainlinkTick =
+      asset === CRYPTO_ASSETS.ETH
+        ? tickContext.ethChainlinkTick
+        : tickContext.btcChainlinkTick;
     const upView = buildOutcomeMarketView(
       market.tokenIdsByOutcome.up,
       marketData.booksByTokenId,
@@ -182,21 +271,24 @@ export function buildMarketSnapshots({
     const sourceQuality = deriveSourceQuality({
       upView,
       downView,
-      latestChainlinkTick,
+      referenceChainlinkTick,
       nowTs,
     });
     const phase = getSnapshotPhase(secondBucket, market.windowStartTs, market.windowEndTs);
     const finalForensicsFields = isFinalForensicsSnapshot(secondBucket, market)
       ? buildFinalForensicsFields({
+          btcBinanceTick: tickContext.btcBinanceTick,
+          btcChainlinkTick: tickContext.btcChainlinkTick,
           downView,
-          latestBinanceTick,
-          latestChainlinkTick,
+          ethBinanceTick: tickContext.ethBinanceTick,
+          ethChainlinkTick: tickContext.ethChainlinkTick,
           nowTs,
           upView,
         })
       : null;
 
     snapshots.push({
+      asset,
       marketSlug: market.slug,
       marketId: market.marketId,
       ts: nowTs,
@@ -224,8 +316,10 @@ export function buildMarketSnapshots({
       downDepthAskTop: downView.depthAskTop,
       displayRuleUsed:
         upView.displayedRule !== "unknown" ? upView.displayedRule : downView.displayedRule,
-      btcChainlink: latestChainlinkTick?.price ?? null,
-      btcBinance: latestBinanceTick?.price ?? null,
+      btcChainlink: tickContext.btcChainlinkTick?.price ?? null,
+      btcBinance: tickContext.btcBinanceTick?.price ?? null,
+      ethChainlink: tickContext.ethChainlinkTick?.price ?? null,
+      ethBinance: tickContext.ethBinanceTick?.price ?? null,
       marketImbalance: deriveMarketImbalance(
         upView.displayedPrice,
         downView.displayedPrice,

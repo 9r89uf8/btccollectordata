@@ -1,7 +1,12 @@
 import { query } from "./_generated/server";
+import { CRYPTO_ASSETS } from "../packages/shared/src/ingest.js";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 export const getProjectShell = query({
   args: {},
@@ -11,7 +16,8 @@ export const getProjectShell = query({
       .query("markets")
       .withIndex("by_windowStartTs")
       .order("desc")
-      .first();
+      .take(100);
+    const latestBtcMarket = latestMarket.find(isBtcMarket) ?? null;
     const latestSummary = await ctx.db
       .query("market_summaries")
       .withIndex("by_windowStartTs")
@@ -23,6 +29,7 @@ export const getProjectShell = query({
       .collect();
     const activeMarkets = activeMarketRows.filter(
       (market) =>
+        isBtcMarket(market) &&
         market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS &&
         market.windowStartTs <= nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS,
     );
@@ -32,7 +39,7 @@ export const getProjectShell = query({
     const wsBackedActiveMarkets = activeMarkets.filter(
       (market) => market.captureMode === "ws",
     ).length;
-    const discoveryComplete = Boolean(latestMarket);
+    const discoveryComplete = Boolean(latestBtcMarket);
     const summariesLive = Boolean(latestSummary);
     const shadowReady = wsBackedActiveMarkets > 0;
 

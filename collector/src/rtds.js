@@ -1,25 +1,38 @@
 import {
   BTC_SOURCES,
-  BTC_SYMBOLS,
+  DEFAULT_CRYPTO_ASSETS,
+  PRICE_SOURCES,
   RTDS_TOPICS,
+  getCryptoSymbolsForAsset,
+  normalizeCryptoAssets,
 } from "../../packages/shared/src/ingest.js";
 
 const MAX_RECONNECT_DELAY_MS = 30000;
 
-function createSubscriptions(enableBinanceContext) {
-  const subscriptions = [
-    {
+function createSubscriptions({ cryptoAssets = DEFAULT_CRYPTO_ASSETS, enableBinanceContext }) {
+  const assets = normalizeCryptoAssets(cryptoAssets);
+  const subscriptions = assets
+    .map((asset) => getCryptoSymbolsForAsset(asset)?.[PRICE_SOURCES.CHAINLINK])
+    .filter(Boolean)
+    .map((symbol) => ({
       topic: RTDS_TOPICS.CHAINLINK_CRYPTO,
       type: "*",
-      filters: JSON.stringify({ symbol: BTC_SYMBOLS.CHAINLINK_BTC_USD }),
-    },
-  ];
+      filters: JSON.stringify({ symbol }),
+    }));
 
   if (enableBinanceContext) {
+    const binanceSymbols = assets
+      .map((asset) => getCryptoSymbolsForAsset(asset)?.[PRICE_SOURCES.BINANCE])
+      .filter(Boolean);
+
+    if (binanceSymbols.length === 0) {
+      return subscriptions;
+    }
+
     subscriptions.push({
       topic: RTDS_TOPICS.BINANCE_CRYPTO,
       type: "update",
-      filters: JSON.stringify({ symbol: BTC_SYMBOLS.BINANCE_BTC_USDT }),
+      filters: binanceSymbols.join(","),
     });
   }
 
@@ -65,7 +78,7 @@ function extractTicksFromMessage(message) {
         .map((entry) =>
           normalizeSingleTick({
             payload: {
-              symbol: payload.symbol ?? BTC_SYMBOLS.CHAINLINK_BTC_USD,
+              symbol: payload.symbol,
               ...entry,
             },
             source: BTC_SOURCES.CHAINLINK,
@@ -197,7 +210,10 @@ export function startRtdsClient({
   function subscribe() {
     const message = {
       action: "subscribe",
-      subscriptions: createSubscriptions(config.enableBinanceContext),
+      subscriptions: createSubscriptions({
+        cryptoAssets: config.cryptoAssets,
+        enableBinanceContext: config.enableBinanceContext,
+      }),
     };
 
     socket.send(JSON.stringify(message));

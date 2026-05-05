@@ -5,10 +5,10 @@ const crons = cronJobs();
 const ANALYTICS_MATERIALIZER_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
 crons.interval(
-  "discover active polymarket btc 5m markets",
+  "discover active polymarket crypto 5m markets",
   { seconds: 60 },
-  internal.internal.discovery.syncActiveBtc5mMarkets,
-  { limit: 50, maxPages: 2 },
+  internal.internal.discovery.syncActiveCrypto5mMarkets,
+  { assets: ["btc", "eth"], limit: 50, maxPages: 2 },
 );
 
 crons.interval(

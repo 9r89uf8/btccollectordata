@@ -1,7 +1,15 @@
-import { BTC_SOURCES, BTC_SYMBOLS } from "../../packages/shared/src/ingest.js";
+import {
+  BTC_SOURCES,
+  BTC_SYMBOLS,
+  CRYPTO_ASSETS,
+} from "../../packages/shared/src/ingest.js";
 
 const DEFAULT_REFERENCE_MAX_DISTANCE_MS = 30 * 1000;
 const ACTIVE_REFERENCE_LOOKBACK_MS = 15 * 60 * 1000;
+
+function isBtcMarket(market) {
+  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
+}
 
 function chooseNearestTick(beforeTick, afterTick, targetTs, preferDirection) {
   if (!beforeTick) {
@@ -130,7 +138,7 @@ export async function syncActiveMarketStartReferences(
         market,
       ]),
     ).values(),
-  ];
+  ].filter(isBtcMarket);
 
   let updated = 0;
 
