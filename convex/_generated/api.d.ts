@@ -11,6 +11,7 @@
 import type * as analytics from "../analytics.js";
 import type * as btc from "../btc.js";
 import type * as crons from "../crons.js";
+import type * as cryptoAnalytics from "../cryptoAnalytics.js";
 import type * as events from "../events.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   btc: typeof btc;
   crons: typeof crons;
+  cryptoAnalytics: typeof cryptoAnalytics;
   events: typeof events;
   health: typeof health;
   http: typeof http;

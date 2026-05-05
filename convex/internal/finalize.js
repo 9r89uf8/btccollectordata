@@ -394,12 +394,14 @@ export const finalizeMarketsBySlug = internalMutation({
 
 export const listRecentClosedSyncCandidates = internalQuery({
   args: {
+    asset: v.optional(v.union(v.literal("btc"), v.literal("eth"))),
     limit: v.optional(v.number()),
     lookbackMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const limit = Math.max(1, Math.min(args.limit ?? 50, 200));
-    const lookbackMs = Math.max(60_000, Math.min(args.lookbackMs ?? 12 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000));
+    const asset = args.asset ?? CRYPTO_ASSETS.BTC;
+    const lookbackMs = Math.max(60_000, Math.min(args.lookbackMs ?? 24 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000));
     const nowTs = Date.now();
     const markets = await ctx.db
       .query("markets")
@@ -410,7 +412,7 @@ export const listRecentClosedSyncCandidates = internalQuery({
       .collect();
 
     return markets
-      .filter(isBtcMarket)
+      .filter((market) => (market.asset ?? CRYPTO_ASSETS.BTC) === asset)
       .filter((market) =>
         market.winningOutcome == null ||
         market.priceToBeatOfficial == null ||
@@ -431,18 +433,44 @@ export const reconcileRecentClosedMarkets = internalAction({
     force: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const candidateSlugs = await ctx.runQuery(
+    const btcCandidateSlugs = await ctx.runQuery(
       internal.internal.finalize.listRecentClosedSyncCandidates,
       {
+        asset: CRYPTO_ASSETS.BTC,
         limit: args.closedLimit ?? 50,
       },
     );
-    const closedSync =
-      candidateSlugs.length > 0
+    const ethCandidateSlugs = await ctx.runQuery(
+      internal.internal.finalize.listRecentClosedSyncCandidates,
+      {
+        asset: CRYPTO_ASSETS.ETH,
+        limit: args.closedLimit ?? 50,
+      },
+    );
+    const btcClosedSync =
+      btcCandidateSlugs.length > 0
         ? await ctx.runAction(
             internal.internal.discovery.syncClosedBtc5mMarketsBySlug,
             {
-              slugs: candidateSlugs,
+              slugs: btcCandidateSlugs,
+            },
+          )
+        : {
+            discoveredCount: 0,
+            fetchedEvents: 0,
+            inserted: 0,
+            missingSlugs: 0,
+            retriesUsed: 0,
+            skipSummary: {},
+            slugCount: 0,
+            updated: 0,
+          };
+    const ethClosedSync =
+      ethCandidateSlugs.length > 0
+        ? await ctx.runAction(
+            internal.internal.discovery.syncClosedEth5mMarketsBySlug,
+            {
+              slugs: ethCandidateSlugs,
             },
           )
         : {
@@ -465,12 +493,19 @@ export const reconcileRecentClosedMarkets = internalAction({
     );
 
     console.log("[finalize] reconciliation summary", {
-      closedSync: {
-        candidateSlugs: candidateSlugs.length,
-        discoveredCount: closedSync.discoveredCount,
-        fetchedEvents: closedSync.fetchedEvents,
-        missingSlugs: closedSync.missingSlugs,
-        retriesUsed: closedSync.retriesUsed,
+      btcClosedSync: {
+        candidateSlugs: btcCandidateSlugs.length,
+        discoveredCount: btcClosedSync.discoveredCount,
+        fetchedEvents: btcClosedSync.fetchedEvents,
+        missingSlugs: btcClosedSync.missingSlugs,
+        retriesUsed: btcClosedSync.retriesUsed,
+      },
+      ethClosedSync: {
+        candidateSlugs: ethCandidateSlugs.length,
+        discoveredCount: ethClosedSync.discoveredCount,
+        fetchedEvents: ethClosedSync.fetchedEvents,
+        missingSlugs: ethClosedSync.missingSlugs,
+        retriesUsed: ethClosedSync.retriesUsed,
       },
       finalization: {
         finalized: finalization.finalized,
@@ -480,7 +515,8 @@ export const reconcileRecentClosedMarkets = internalAction({
     });
 
     return {
-      closedSync,
+      btcClosedSync,
+      ethClosedSync,
       finalization,
     };
   },

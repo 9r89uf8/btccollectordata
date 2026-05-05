@@ -26,7 +26,7 @@ export default function SiteHeader({ current = "/" }) {
             BTCGT
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-            Polymarket BTC Up/Down 5m tracker
+            Polymarket BTC/ETH Up/Down 5m tracker
           </h1>
         </div>
         <div className="flex flex-wrap gap-2 rounded-full border border-black/10 bg-stone-100/80 p-1">
@@ -37,7 +37,10 @@ export default function SiteHeader({ current = "/" }) {
             Markets
           </NavLink>
           <NavLink href="/analytics" current={current}>
-            Analytics
+            BTC analytics
+          </NavLink>
+          <NavLink href="/analytics/btc-eth" current={current}>
+            BTC/ETH
           </NavLink>
         </div>
       </div>
@@ -53,7 +56,7 @@ export default function SiteHeader({ current = "/" }) {
           Step 10 WS rollout
         </span>
         <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1">
-          BTC analytics v1
+          BTC/ETH compare
         </span>
       </div>
     </header>
