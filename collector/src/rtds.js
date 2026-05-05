@@ -11,14 +11,19 @@ const MAX_RECONNECT_DELAY_MS = 30000;
 
 function createSubscriptions({ cryptoAssets = DEFAULT_CRYPTO_ASSETS, enableBinanceContext }) {
   const assets = normalizeCryptoAssets(cryptoAssets);
-  const subscriptions = assets
+  const chainlinkSymbols = assets
     .map((asset) => getCryptoSymbolsForAsset(asset)?.[PRICE_SOURCES.CHAINLINK])
-    .filter(Boolean)
-    .map((symbol) => ({
-      topic: RTDS_TOPICS.CHAINLINK_CRYPTO,
-      type: "*",
-      filters: JSON.stringify({ symbol }),
-    }));
+    .filter(Boolean);
+  const subscriptions =
+    chainlinkSymbols.length > 0
+      ? [
+          {
+            topic: RTDS_TOPICS.CHAINLINK_CRYPTO,
+            type: "*",
+            filters: "",
+          },
+        ]
+      : [];
 
   if (enableBinanceContext) {
     const binanceSymbols = assets

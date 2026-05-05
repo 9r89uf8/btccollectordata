@@ -76,16 +76,13 @@ test("startRtdsClient subscribes to BTC and ETH Chainlink and Binance feeds", as
 
     const message = JSON.parse(socket.sent[0]);
 
-    assert.equal(message.subscriptions.length, 3);
-    assert.deepEqual(JSON.parse(message.subscriptions[0].filters), {
-      symbol: "btc/usd",
-    });
-    assert.deepEqual(JSON.parse(message.subscriptions[1].filters), {
-      symbol: "eth/usd",
-    });
-    assert.equal(message.subscriptions[2].topic, "crypto_prices");
-    assert.equal(message.subscriptions[2].type, "update");
-    assert.equal(Object.hasOwn(message.subscriptions[2], "filters"), false);
+    assert.equal(message.subscriptions.length, 2);
+    assert.equal(message.subscriptions[0].topic, "crypto_prices_chainlink");
+    assert.equal(message.subscriptions[0].type, "*");
+    assert.equal(message.subscriptions[0].filters, "");
+    assert.equal(message.subscriptions[1].topic, "crypto_prices");
+    assert.equal(message.subscriptions[1].type, "update");
+    assert.equal(Object.hasOwn(message.subscriptions[1], "filters"), false);
 
     client.stop();
   });
