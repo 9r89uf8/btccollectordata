@@ -45,14 +45,19 @@ function LoadingGrid() {
 }
 
 export default function MarketsDashboard() {
-  const activeMarkets = useQuery(api.markets.listActiveBtc5m);
+  const activeMarkets = useQuery(api.markets.listActiveCrypto5m, {
+    assets: ["btc", "eth"],
+  });
   const activeSnapshots = useQuery(
     api.snapshots.listLatestByMarketSlugs,
     activeMarkets === undefined
       ? "skip"
       : { slugs: activeMarkets.map((market) => market.slug) },
   );
-  const recentMarkets = useQuery(api.markets.listRecentBtc5m, { limit: 6 });
+  const recentMarkets = useQuery(api.markets.listRecentCrypto5m, {
+    assets: ["btc", "eth"],
+    limit: 8,
+  });
 
   const deferredActiveMarkets = useDeferredValue(activeMarkets);
   const deferredActiveSnapshots = useDeferredValue(activeSnapshots);
@@ -67,8 +72,8 @@ export default function MarketsDashboard() {
       <section className="space-y-10">
         <SectionHeader
           eyebrow="Catalog"
-          title="Discovered BTC 5-minute markets"
-          description="Loading the active and recent catalog from Convex."
+          title="Discovered crypto 5-minute markets"
+          description="Loading the active and recent BTC and ETH catalog from Convex."
           count="..."
         />
         <LoadingGrid />
@@ -93,8 +98,8 @@ export default function MarketsDashboard() {
     <section className="space-y-10">
       <SectionHeader
         eyebrow="Catalog"
-        title="Discovered BTC 5-minute markets"
-        description="Active markets now include the latest polled snapshot state from CLOB plus Chainlink BTC. Recent entries below remain catalog-only until they have replay data."
+        title="Discovered BTC and ETH 5-minute markets"
+        description="Active markets now include the latest polled CLOB snapshot state plus Chainlink crypto references. Recent entries below remain catalog-only until they have replay data."
         count={active.length + recent.length}
       />
 
@@ -111,7 +116,7 @@ export default function MarketsDashboard() {
 
           {active.length === 0 ? (
             <div className="rounded-[1.35rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm leading-7 text-stone-700">
-              No active BTC 5-minute markets are cataloged right now.
+              No active BTC or ETH 5-minute markets are cataloged right now.
             </div>
           ) : (
             <div className="grid gap-4">

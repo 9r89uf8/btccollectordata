@@ -1,23 +1,18 @@
 import { query } from "./_generated/server";
-import { CRYPTO_ASSETS } from "../packages/shared/src/ingest.js";
 
 const ACTIVE_WINDOW_GRACE_MS = 60 * 1000;
 const ACTIVE_WINDOW_LOOKAHEAD_MS = 10 * 60 * 1000;
-
-function isBtcMarket(market) {
-  return (market?.asset ?? CRYPTO_ASSETS.BTC) === CRYPTO_ASSETS.BTC;
-}
 
 export const getProjectShell = query({
   args: {},
   handler: async (ctx) => {
     const nowTs = Date.now();
-    const latestMarket = await ctx.db
+    const latestMarkets = await ctx.db
       .query("markets")
       .withIndex("by_windowStartTs")
       .order("desc")
       .take(100);
-    const latestBtcMarket = latestMarket.find(isBtcMarket) ?? null;
+    const latestMarket = latestMarkets[0] ?? null;
     const latestSummary = await ctx.db
       .query("market_summaries")
       .withIndex("by_windowStartTs")
@@ -29,7 +24,6 @@ export const getProjectShell = query({
       .collect();
     const activeMarkets = activeMarketRows.filter(
       (market) =>
-        isBtcMarket(market) &&
         market.windowEndTs >= nowTs - ACTIVE_WINDOW_GRACE_MS &&
         market.windowStartTs <= nowTs + ACTIVE_WINDOW_LOOKAHEAD_MS,
     );
@@ -39,12 +33,12 @@ export const getProjectShell = query({
     const wsBackedActiveMarkets = activeMarkets.filter(
       (market) => market.captureMode === "ws",
     ).length;
-    const discoveryComplete = Boolean(latestBtcMarket);
+    const discoveryComplete = Boolean(latestMarket);
     const summariesLive = Boolean(latestSummary);
     const shadowReady = wsBackedActiveMarkets > 0;
 
     return {
-      projectName: "Polymarket BTC Up/Down 5-minute tracker",
+      projectName: "Polymarket BTC/ETH Up/Down 5-minute tracker",
       phase: summariesLive
         ? "summaries"
         : shadowReady
@@ -53,11 +47,11 @@ export const getProjectShell = query({
             ? "dashboard"
             : "foundation",
       summary: summariesLive
-        ? "Gamma discovery, polling snapshots, and stored summaries are live. Fast-moving collector health and latest BTC now load through their own narrow queries instead of the broad project shell."
+        ? "Gamma discovery, polling snapshots, and stored summaries are live. Fast-moving collector health and latest crypto ticks now load through their own narrow queries instead of the broad project shell."
         : shadowReady
           ? "Gamma discovery is live, active market capture includes WebSocket-backed rows, and the dashboard is ready while summary coverage catches up."
           : discoveryComplete
-            ? "Gamma-backed BTC 5-minute catalog rows are live in Convex, the dashboard is up, and live collector details now load through narrow health queries."
+            ? "Gamma-backed BTC/ETH 5-minute catalog rows are live in Convex, the dashboard is up, and live collector details now load through narrow health queries."
             : "Convex is installed, the App Router shell is wired, and the schema stub is in place. Discovery, ingest, and polling snapshots are the next implementation slices.",
       services: [
         {
@@ -81,7 +75,7 @@ export const getProjectShell = query({
         {
           name: "collector",
           state: discoveryComplete ? "ready" : "pending",
-          note: "Collector health, latest BTC, and batch diagnostics are loaded separately below so the shell query no longer rereads broad tables on every heartbeat.",
+          note: "Collector health, latest crypto ticks, and batch diagnostics are loaded separately below so the shell query no longer rereads broad tables on every heartbeat.",
         },
       ],
       catalog: {
@@ -118,8 +112,8 @@ export const getProjectShell = query({
           done: discoveryComplete,
         },
         {
-          id: "btc-ingest",
-          label: "Stream Chainlink BTC into Convex and report collector health",
+          id: "crypto-ingest",
+          label: "Stream Chainlink BTC/ETH into Convex and report collector health",
           done: discoveryComplete,
         },
         {

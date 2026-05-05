@@ -28,6 +28,8 @@ function buildMissingTimelineEntry(market, secondBucket) {
     downLast: null,
     downMid: null,
     downSpread: null,
+    ethBinance: null,
+    ethChainlink: null,
     marketId: market.marketId,
     marketSlug: market.slug,
     marketImbalance: null,

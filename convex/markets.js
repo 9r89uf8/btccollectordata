@@ -116,6 +116,29 @@ export const listRecentBtc5m = query({
   },
 });
 
+export const listRecentCrypto5m = query({
+  args: {
+    assets: v.optional(v.array(cryptoAssetValue)),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 12, 50));
+    const requestedAssets = getRequestedAssets(args.assets, [
+      CRYPTO_ASSETS.BTC,
+      CRYPTO_ASSETS.ETH,
+    ]);
+    const rows = await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .take(limit * 4);
+
+    return rows
+      .filter((market) => requestedAssets.has(getMarketAsset(market)))
+      .slice(0, limit);
+  },
+});
+
 export const listCountsByDay = query({
   args: {
     limitDays: v.optional(v.number()),
@@ -219,6 +242,38 @@ export const listArchiveBtc5m = query({
       ...result,
       page: result.page.filter((market) => isMarketAsset(market, CRYPTO_ASSETS.BTC)),
     };
+  },
+});
+
+export const listArchiveCrypto5m = query({
+  args: {
+    status: v.optional(archiveStatusValue),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const status = args.status ?? "past";
+
+    if (status === "past") {
+      return await ctx.db
+        .query("markets")
+        .withIndex("by_active_windowStartTs", (q) => q.eq("active", false))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (status === "resolved") {
+      return await ctx.db
+        .query("markets")
+        .withIndex("by_resolved_windowEndTs", (q) => q.eq("resolved", true))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("markets")
+      .withIndex("by_windowStartTs")
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 

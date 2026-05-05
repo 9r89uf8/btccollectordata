@@ -40,14 +40,14 @@ export default function Home() {
           </div>
           <div className="space-y-4">
             <p className="text-sm font-medium uppercase tracking-[0.28em] text-amber-700">
-              Polymarket BTC Up/Down 5m
+              Polymarket BTC and ETH Up/Down 5m
             </p>
             <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
               Discovery, replay, summaries, and WS shadow capture are now live.
             </h1>
             <p className="max-w-2xl text-base leading-7 text-stone-700 sm:text-lg">
-              Active BTC 5-minute markets are pulled from Gamma into Convex and
-              surfaced here. Chainlink BTC ticks and one-second CLOB polling
+              Active BTC and ETH 5-minute markets are pulled from Gamma into Convex and
+              surfaced here. Chainlink crypto ticks and one-second CLOB polling
               snapshots now flow through the collector into Convex, and the
               market WebSocket now runs beside polling in shadow mode to store
               raw events and measure parity. Each market route renders replay
@@ -69,7 +69,7 @@ export default function Home() {
                 Current sources
               </p>
               <p className="mt-2 text-sm leading-6 text-stone-700">
-                Gamma discovery, Chainlink RTDS BTC, CLOB polls, and market WS shadow
+                Gamma discovery, Chainlink RTDS BTC/ETH, CLOB polls, and market WS shadow
               </p>
             </div>
             <div className="rounded-[1.2rem] border border-black/10 bg-white/75 p-4">
@@ -118,8 +118,8 @@ export default function Home() {
             Step 10 live
           </p>
           <ul className="mt-4 space-y-3 text-sm leading-7 text-stone-700">
-            <li>Collector batches now post BTC ticks and market snapshots through the private Convex ingest route.</li>
-            <li>Chainlink `btc/usd` RTDS ticks and CLOB polling snapshots now write into Convex together.</li>
+            <li>Collector batches now post BTC/ETH ticks and market snapshots through the private Convex ingest route.</li>
+            <li>Chainlink `btc/usd` and `eth/usd` RTDS ticks and CLOB polling snapshots now write into Convex together.</li>
             <li>Market WebSocket shadow capture now stores raw events in `market_events_raw` and keeps in-memory orderbook state for parity checks.</li>
             <li>Polling remains the persisted snapshot source while capture-mode rollout is gated by parity metrics and reconnect health.</li>
           </ul>

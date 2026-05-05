@@ -87,12 +87,50 @@ export function formatBtcUsd(value) {
   return USD_FORMATTER.format(value);
 }
 
+export function formatUsd(value) {
+  return formatBtcUsd(value);
+}
+
 export function formatBtcReferenceValue(value, fallbackLabel = "pending") {
   if (value == null) {
     return fallbackLabel;
   }
 
   return formatBtcUsd(value);
+}
+
+export function formatReferenceValue(value, fallbackLabel = "pending") {
+  return formatBtcReferenceValue(value, fallbackLabel);
+}
+
+export function getMarketAsset(market) {
+  return market?.asset === "eth" ? "eth" : "btc";
+}
+
+export function getAssetLabel(assetOrMarket) {
+  const asset =
+    typeof assetOrMarket === "string"
+      ? assetOrMarket
+      : getMarketAsset(assetOrMarket);
+
+  return asset === "eth" ? "ETH" : "BTC";
+}
+
+export function getAssetName(assetOrMarket) {
+  const asset =
+    typeof assetOrMarket === "string"
+      ? assetOrMarket
+      : getMarketAsset(assetOrMarket);
+
+  return asset === "eth" ? "Ethereum" : "Bitcoin";
+}
+
+export function getChainlinkSnapshotKey(assetOrMarket) {
+  return getMarketAsset(assetOrMarket) === "eth" ? "ethChainlink" : "btcChainlink";
+}
+
+export function getBinanceSnapshotKey(assetOrMarket) {
+  return getMarketAsset(assetOrMarket) === "eth" ? "ethBinance" : "btcBinance";
 }
 
 export function formatRelativeSecond(value) {

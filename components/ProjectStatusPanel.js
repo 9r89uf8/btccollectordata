@@ -68,6 +68,7 @@ function formatShellCount(value) {
 export default function ProjectStatusPanel() {
   const shell = useQuery(api.status.getProjectShell);
   const latestBtc = useQuery(api.btc.getLatestChainlinkBtc);
+  const latestEth = useQuery(api.btc.getLatestChainlinkEth);
   const collectorHealth = useQuery(api.health.getCollectorHealth, {});
 
   if (shell === undefined) {
@@ -149,6 +150,23 @@ export default function ProjectStatusPanel() {
 
         <article className="rounded-[1.2rem] border border-black/10 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-stone-950">Latest Chainlink ETH</h3>
+            <Pill tone={latestEth?.stale ? "pending" : "good"}>
+              {latestEth ? (latestEth.stale ? "stale" : "live") : "pending"}
+            </Pill>
+          </div>
+          <p className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-stone-950">
+            {latestEth ? formatUsd(latestEth.price) : "Waiting for RTDS ticks"}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-stone-700">
+            {latestEth
+              ? `${latestEth.symbol} captured ${formatAge(latestEth.ageMs)} at ${formatEtDateTime(latestEth.ts)}`
+              : "No Chainlink ETH ticks have been written yet."}
+          </p>
+        </article>
+
+        <article className="rounded-[1.2rem] border border-black/10 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
             <h3 className="font-semibold text-stone-950">Collector health</h3>
             <Pill
               tone={
@@ -195,7 +213,7 @@ export default function ProjectStatusPanel() {
           ) : null}
           <p className="mt-3 text-sm leading-6 text-stone-600">
             {collectorHealth
-              ? `Last batch wrote ${collectorHealth.lastBatchRawEvents ?? 0} raw events, ${collectorHealth.lastBatchSnapshots ?? 0} snapshots, and ${collectorHealth.lastBatchBtcTicks ?? 0} BTC ticks.`
+              ? `Last batch wrote ${collectorHealth.lastBatchRawEvents ?? 0} raw events, ${collectorHealth.lastBatchSnapshots ?? 0} snapshots, and ${collectorHealth.lastBatchBtcTicks ?? 0} crypto ticks.`
               : "Batch write counts appear after the collector sends data."}
           </p>
           <p className="mt-3 text-sm leading-6 text-stone-600">

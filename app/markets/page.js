@@ -6,7 +6,7 @@ import { getPublicConvexUrl } from "@/lib/convexUrl";
 export const metadata = {
   title: "BTCGT | Saved Markets",
   description:
-    "Browse saved Polymarket BTC Up/Down 5-minute markets from the Convex catalog archive.",
+    "Browse saved Polymarket BTC and ETH Up/Down 5-minute markets from the Convex catalog archive.",
 };
 
 export default function MarketsPage() {
@@ -37,7 +37,7 @@ export default function MarketsPage() {
             Market archive
           </p>
           <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
-            Past BTC 5-minute markets now have a dedicated archive page.
+            Past BTC and ETH 5-minute markets have a dedicated archive page.
           </h1>
           <p className="max-w-3xl text-base leading-7 text-stone-700 sm:text-lg">
             Use this route to page through ended, resolved, or fully saved

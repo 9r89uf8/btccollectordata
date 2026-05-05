@@ -11,15 +11,20 @@ import {
   getReplayCoverage,
 } from "@/components/marketReplay.mjs";
 import {
-  formatBtcReferenceValue,
-  formatBtcUsd,
   formatElapsedMarketTime,
   formatEtDateTime,
   formatEtRange,
   formatEtTimeWithSeconds,
   formatProbability,
+  formatReferenceValue,
   formatRelativeSecond,
   formatSnapshotQualityLabel,
+  formatUsd,
+  getAssetLabel,
+  getAssetName,
+  getBinanceSnapshotKey,
+  getChainlinkSnapshotKey,
+  getMarketAsset,
   getMarketState,
   getSnapshotQualityTone,
   getToneClasses,
@@ -157,6 +162,7 @@ function getBucketPhase(secondBucket, market) {
 function buildMissingFinalWindowEntry(market, secondBucket) {
   return {
     _id: `final-missing-${market.slug}-${secondBucket}`,
+    asset: getMarketAsset(market),
     btcBinance: null,
     btcChainlink: null,
     displayRuleUsed: "unknown",
@@ -168,6 +174,8 @@ function buildMissingFinalWindowEntry(market, secondBucket) {
     downLast: null,
     downMid: null,
     downSpread: null,
+    ethBinance: null,
+    ethChainlink: null,
     marketId: market.marketId,
     marketImbalance: null,
     marketSlug: market.slug,
@@ -335,6 +343,8 @@ function FinalTenSecondTape({ market, rows }) {
   const startSecond = Number.isFinite(windowSeconds)
     ? Math.max(0, windowSeconds - 10)
     : null;
+  const assetLabel = getAssetLabel(market);
+  const chainlinkKey = getChainlinkSnapshotKey(market);
 
   return (
     <article className="rounded-[1.45rem] border border-black/10 bg-white/85 p-6 shadow-[0_14px_40px_rgba(30,30,30,0.05)]">
@@ -371,7 +381,7 @@ function FinalTenSecondTape({ market, rows }) {
                 <th className="px-4 py-3 font-semibold">Second</th>
                 <th className="px-4 py-3 font-semibold">Up</th>
                 <th className="px-4 py-3 font-semibold">Down</th>
-                <th className="px-4 py-3 font-semibold">BTC</th>
+                <th className="px-4 py-3 font-semibold">{assetLabel}</th>
                 <th className="px-4 py-3 font-semibold">Rule</th>
                 <th className="px-4 py-3 font-semibold">Quality</th>
               </tr>
@@ -405,7 +415,7 @@ function FinalTenSecondTape({ market, rows }) {
                     {formatProbability(snapshot.downDisplayed)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    {formatBtcUsd(snapshot.btcChainlink)}
+                    {formatUsd(snapshot[chainlinkKey])}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {formatSnapshotQualityLabel(snapshot.displayRuleUsed)}
@@ -427,13 +437,16 @@ function FinalTenSecondTape({ market, rows }) {
 
 function FinalTenSecondChart({ market, rows }) {
   const windowSeconds = getMarketWindowSeconds(market);
-  const finalBtcKeys = ["btcChainlink", "btcBinance"];
-  const finalBtcDomain = getBtcDomain(rows, finalBtcKeys);
-  const finalBtcTicks = getBtcTicks(finalBtcDomain);
-  const showBtcAxis = hasBtcValues(rows, finalBtcKeys);
+  const assetLabel = getAssetLabel(market);
+  const chainlinkKey = getChainlinkSnapshotKey(market);
+  const binanceKey = getBinanceSnapshotKey(market);
+  const finalReferenceKeys = [chainlinkKey, binanceKey];
+  const finalReferenceDomain = getBtcDomain(rows, finalReferenceKeys);
+  const finalReferenceTicks = getBtcTicks(finalReferenceDomain);
+  const showReferenceAxis = hasBtcValues(rows, finalReferenceKeys);
   const priceToBeat = market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
-  const endingChainlink = getEndingBtcSnapshot(rows, "btcChainlink", market);
-  const endingBinance = getEndingBtcSnapshot(rows, "btcBinance", market);
+  const endingChainlink = getEndingBtcSnapshot(rows, chainlinkKey, market);
+  const endingBinance = getEndingBtcSnapshot(rows, binanceKey, market);
 
   return (
     <ReplayLineChart
@@ -445,13 +458,13 @@ function FinalTenSecondChart({ market, rows }) {
         Math.max(0, (windowSeconds ?? 300) - 10),
       )} to ${formatElapsedMarketTime(
         windowSeconds ?? 300,
-      )} with Chainlink and Binance BTC.`}
+      )} with Chainlink and Binance ${assetLabel}.`}
       emptyMessage="Final-window replay rows are pending."
       formatAxisValue={(tick) => formatProbability(tick)}
       formatPrimaryXValue={(entry) =>
         formatElapsedMarketTime(entry?.secondsFromWindowStart)
       }
-      formatSecondaryAxisValue={showBtcAxis ? formatBtcAxisValue : null}
+      formatSecondaryAxisValue={showReferenceAxis ? formatBtcAxisValue : null}
       formatSecondaryXValue={(entry) =>
         formatEtTimeWithSeconds(entry?.secondBucket ?? entry?.ts)
       }
@@ -472,39 +485,39 @@ function FinalTenSecondChart({ market, rows }) {
           axis: "secondary",
           color: "#1d4ed8",
           dashArray: "8 6",
-          key: "btcChainlink",
-          label: "Chainlink BTC",
+          key: chainlinkKey,
+          label: `Chainlink ${assetLabel}`,
         },
         {
           axis: "secondary",
           color: "#ea580c",
           dashArray: "3 5",
-          key: "btcBinance",
-          label: "Binance BTC",
+          key: binanceKey,
+          label: `Binance ${assetLabel}`,
         },
       ]}
       summaryItems={[
         {
           label: "Price to beat",
           note: getPriceToBeatSource(market),
-          value: formatBtcReferenceValue(
+          value: formatReferenceValue(
             priceToBeat,
             market.active ? "not published yet" : "missing",
           ),
         },
         {
-          label: "End Chainlink BTC",
+          label: `End Chainlink ${assetLabel}`,
           note: formatEndingBtcNote(endingChainlink),
-          value: formatBtcUsd(endingChainlink?.btcChainlink),
+          value: formatUsd(endingChainlink?.[chainlinkKey]),
         },
         {
-          label: "End Binance BTC",
+          label: `End Binance ${assetLabel}`,
           note: formatEndingBtcNote(endingBinance),
-          value: formatBtcUsd(endingBinance?.btcBinance),
+          value: formatUsd(endingBinance?.[binanceKey]),
         },
       ]}
-      secondaryYDomain={showBtcAxis ? finalBtcDomain : null}
-      secondaryYTicks={showBtcAxis ? finalBtcTicks : []}
+      secondaryYDomain={showReferenceAxis ? finalReferenceDomain : null}
+      secondaryYTicks={showReferenceAxis ? finalReferenceTicks : []}
       timeline={rows}
       xTickMode="all"
       yDomain={[0, 1]}
@@ -564,6 +577,12 @@ export default function MarketDetailScaffold({ slug }) {
   }
 
   const state = getMarketState(market);
+  const asset = getMarketAsset(market);
+  const assetLabel = getAssetLabel(market);
+  const assetName = getAssetName(market);
+  const chainlinkKey = getChainlinkSnapshotKey(market);
+  const binanceKey = getBinanceSnapshotKey(market);
+  const isBtcMarket = asset === "btc";
   const { cadenceMs, timeline } = buildReplayTimeline(market, replaySnapshots ?? []);
   const coverage = getReplayCoverage(timeline);
   const qualityBreakdown = getQualityBreakdown(timeline);
@@ -573,8 +592,11 @@ export default function MarketDetailScaffold({ slug }) {
   const probabilityTicks = [0, 0.25, 0.5, 0.75, 1];
   const displayedPriceToBeat =
     market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
-  const btcDomain = getBtcDomain(timeline, ["btcChainlink"], [displayedPriceToBeat]);
-  const btcTicks = getBtcTicks(btcDomain);
+  const referenceDomain = getBtcDomain(timeline, [chainlinkKey], [displayedPriceToBeat]);
+  const referenceTicks = getBtcTicks(referenceDomain);
+  const btcContextDomain = asset === "eth" ? getBtcDomain(timeline, ["btcChainlink"]) : null;
+  const btcContextTicks = btcContextDomain ? getBtcTicks(btcContextDomain) : [];
+  const currentReferencePrice = currentSnapshot?.[chainlinkKey];
   const timelineRows = [...timeline].reverse();
   const finalWindowSecondRows = buildFinalWindowSecondRows(timeline, market);
   const liveWindowSeconds = coverage.liveObservedCount + coverage.liveMissingCount;
@@ -634,6 +656,7 @@ export default function MarketDetailScaffold({ slug }) {
       <section className="grid gap-5 rounded-[1.9rem] border border-black/10 bg-[linear-gradient(145deg,rgba(255,252,245,0.96),rgba(244,246,255,0.9))] p-8 shadow-[0_20px_60px_rgba(24,24,24,0.08)] lg:grid-cols-[1.15fr_0.85fr]">
         <div>
           <div className="flex flex-wrap gap-2">
+            <Pill tone={asset === "eth" ? "emerald" : "sky"}>{assetLabel}</Pill>
             <Pill tone={state.tone}>{state.label}</Pill>
             <Pill tone="stone">{market.captureMode}</Pill>
             <Pill tone="amber">{market.dataQuality}</Pill>
@@ -653,8 +676,8 @@ export default function MarketDetailScaffold({ slug }) {
             {market.question}
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-7 text-stone-700">
-            This page is now the replay surface for a BTC 5-minute market. It
-            shows current displayed probabilities, the Chainlink BTC reference,
+            This page is the replay surface for a {assetName} 5-minute market. It
+            shows current displayed probabilities, the Chainlink {assetLabel} reference,
             replay-sample quality state, and explicit missing rows instead of
             smoothing over gaps.
           </p>
@@ -674,10 +697,10 @@ export default function MarketDetailScaffold({ slug }) {
           </div>
           <div className="rounded-[1.35rem] border border-black/10 bg-white/80 p-5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-              Current BTC
+              Current {assetLabel}
             </p>
             <p className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-              {currentSnapshot ? formatBtcUsd(currentSnapshot.btcChainlink) : "pending"}
+              {currentSnapshot ? formatUsd(currentReferencePrice) : "pending"}
             </p>
             <p className="mt-1 text-sm text-stone-700">
               {currentSnapshot ? formatRelativeSecond(currentSnapshot.secondsFromWindowStart) : "pending"}
@@ -699,7 +722,7 @@ export default function MarketDetailScaffold({ slug }) {
               Price to beat
             </p>
             <p className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-              {formatBtcReferenceValue(displayedPriceToBeat, activeReferenceFallback)}
+              {formatReferenceValue(displayedPriceToBeat, activeReferenceFallback)}
             </p>
             <p className="mt-1 text-sm text-stone-700">
               {displayedPriceToBeatLabel}
@@ -729,39 +752,39 @@ export default function MarketDetailScaffold({ slug }) {
           <p>Condition ID: {truncateTokenId(market.conditionId)}</p>
         </InfoCard>
 
-        <InfoCard eyebrow="Resolution reference" title="Stored BTC thresholds">
+        <InfoCard eyebrow="Resolution reference" title={`Stored ${assetLabel} thresholds`}>
           <p>
             Official price to beat:{" "}
-            {formatBtcReferenceValue(
+            {formatReferenceValue(
               market.priceToBeatOfficial,
               activeReferenceFallback,
             )}
           </p>
           <p>
             Derived price to beat:{" "}
-            {formatBtcReferenceValue(
+            {formatReferenceValue(
               market.priceToBeatDerived,
               derivedReferenceFallback,
             )}
           </p>
           <p>
             Official close reference:{" "}
-            {formatBtcReferenceValue(
+            {formatReferenceValue(
               market.closeReferencePriceOfficial,
               activeReferenceFallback,
             )}
           </p>
           <p>
             Derived close reference:{" "}
-            {formatBtcReferenceValue(
+            {formatReferenceValue(
               market.closeReferencePriceDerived,
               derivedReferenceFallback,
             )}
           </p>
           <p>
             Active view:{" "}
-            {formatBtcReferenceValue(displayedPriceToBeat, activeReferenceFallback)} /{" "}
-            {formatBtcReferenceValue(
+            {formatReferenceValue(displayedPriceToBeat, activeReferenceFallback)} /{" "}
+            {formatReferenceValue(
               displayedCloseReference,
               activeReferenceFallback,
             )}
@@ -790,14 +813,14 @@ export default function MarketDetailScaffold({ slug }) {
             <p>Outcome: {formatSummaryOutcome(marketSummary, market)}</p>
             <p>Finalized: {formatEtDateTime(marketSummary.finalizedAt)}</p>
             <p>
-              Official start / end BTC:{" "}
-              {formatBtcUsd(marketSummary.priceToBeatOfficial)} /{" "}
-              {formatBtcUsd(marketSummary.closeReferencePriceOfficial)}
+              Official start / end {assetLabel}:{" "}
+              {formatUsd(marketSummary.priceToBeatOfficial)} /{" "}
+              {formatUsd(marketSummary.closeReferencePriceOfficial)}
             </p>
             <p>
-              Derived start / end BTC:{" "}
-              {formatBtcUsd(marketSummary.priceToBeatDerived)} /{" "}
-              {formatBtcUsd(marketSummary.closeReferencePriceDerived)}
+              Derived start / end {assetLabel}:{" "}
+              {formatUsd(marketSummary.priceToBeatDerived)} /{" "}
+              {formatUsd(marketSummary.closeReferencePriceDerived)}
             </p>
             <p>
               Crossed 60 / 70 / 80:{" "}
@@ -874,16 +897,16 @@ export default function MarketDetailScaffold({ slug }) {
         </section>
       ) : market.closed || market.resolved ? (
         <article className="rounded-[1.45rem] border border-dashed border-black/15 bg-white/70 p-6 text-sm leading-7 text-stone-700">
-          This market is closed, but no finalized `market_summaries` row is
-          stored yet. The finalizer should populate it on the next reconciliation
-          pass.
+          {isBtcMarket
+            ? "This market is closed, but no finalized `market_summaries` row is stored yet. The finalizer should populate it on the next reconciliation pass."
+            : "This ETH market is closed, and replay snapshots are stored for inspection. Summary finalization is currently BTC-only."}
         </article>
       ) : null}
 
       <ReplayLineChart
         eyebrow="Replay"
         title="Displayed probability over time"
-        description={`Lines break when an expected replay sample bucket is missing. ${market.outcomeLabels.upLabel} and ${market.outcomeLabels.downLabel} use the left probability axis, while Chainlink BTC and the price-to-beat reference use the right USD axis. The strip below shows whether each loaded ${formatSamplingCadence(
+        description={`Lines break when an expected replay sample bucket is missing. ${market.outcomeLabels.upLabel} and ${market.outcomeLabels.downLabel} use the left probability axis, while Chainlink ${assetLabel} and the price-to-beat reference use the right USD axis. The strip below shows whether each loaded ${formatSamplingCadence(
           cadenceMs,
         )} bucket was good, stale, gap-filled, or missing.`}
         emptyMessage="No snapshot history has been written for this market yet."
@@ -898,14 +921,14 @@ export default function MarketDetailScaffold({ slug }) {
                 color: "#d97706",
                 dashArray: "7 5",
                 key: "price-to-beat",
-                label: `Price to beat ${formatBtcUsd(displayedPriceToBeat)}`,
+                label: `Price to beat ${formatUsd(displayedPriceToBeat)}`,
                 value: displayedPriceToBeat,
               }
             : null,
         ].filter(Boolean)}
         sampleCadenceMs={cadenceMs}
-        secondaryYDomain={btcDomain}
-        secondaryYTicks={btcTicks}
+        secondaryYDomain={referenceDomain}
+        secondaryYTicks={referenceTicks}
         series={[
           {
             color: "#0f766e",
@@ -921,8 +944,8 @@ export default function MarketDetailScaffold({ slug }) {
             axis: "secondary",
             color: "#1d4ed8",
             dashArray: "8 6",
-            key: "btcChainlink",
-            label: "Chainlink BTC",
+            key: chainlinkKey,
+            label: `Chainlink ${assetLabel}`,
           },
         ]}
         timeline={timeline}
@@ -935,26 +958,48 @@ export default function MarketDetailScaffold({ slug }) {
       <FinalTenSecondTape market={market} rows={finalWindowSecondRows} />
 
       <ReplayLineChart
-        eyebrow="Reference BTC"
-        title="Chainlink BTC over the same replay buckets"
+        eyebrow={`Reference ${assetLabel}`}
+        title={`Chainlink ${assetLabel} over the same replay buckets`}
         description={`This chart uses the same ${formatSamplingCadence(
           cadenceMs,
-        )} replay buckets as the displayed-probability chart so the market and BTC reference can be read together.`}
-        emptyMessage="No BTC-linked snapshots have been written for this market yet."
+        )} replay buckets as the displayed-probability chart so the market and ${assetLabel} reference can be read together.`}
+        emptyMessage={`No ${assetLabel}-linked snapshots have been written for this market yet.`}
         formatAxisValue={formatBtcAxisValue}
         formatTimeValue={formatEtTimeWithSeconds}
         sampleCadenceMs={cadenceMs}
         series={[
           {
             color: "#1d4ed8",
-            key: "btcChainlink",
-            label: "Chainlink BTC",
+            key: chainlinkKey,
+            label: `Chainlink ${assetLabel}`,
           },
         ]}
         timeline={timeline}
-        yDomain={btcDomain}
-        yTicks={btcTicks}
+        yDomain={referenceDomain}
+        yTicks={referenceTicks}
       />
+
+      {asset === "eth" ? (
+        <ReplayLineChart
+          eyebrow="BTC context"
+          title="Chainlink BTC over the same replay buckets"
+          description={`ETH snapshots also carry the latest BTC reference so the two markets can be inspected on the same capture cadence.`}
+          emptyMessage="No BTC context snapshots have been written for this ETH market yet."
+          formatAxisValue={formatBtcAxisValue}
+          formatTimeValue={formatEtTimeWithSeconds}
+          sampleCadenceMs={cadenceMs}
+          series={[
+            {
+              color: "#334155",
+              key: "btcChainlink",
+              label: "Chainlink BTC",
+            },
+          ]}
+          timeline={timeline}
+          yDomain={btcContextDomain ?? [0, 1]}
+          yTicks={btcContextTicks}
+        />
+      ) : null}
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <InfoCard eyebrow="Debug" title="Latest snapshot fields">
@@ -1018,7 +1063,7 @@ export default function MarketDetailScaffold({ slug }) {
                 Up / Down: {formatProbability(latestIssue.upDisplayed)} /{" "}
                 {formatProbability(latestIssue.downDisplayed)}
               </p>
-              <p>BTC: {formatBtcUsd(latestIssue.btcChainlink)}</p>
+              <p>{assetLabel}: {formatUsd(latestIssue[chainlinkKey])}</p>
               <p>Display rule: {formatSnapshotQualityLabel(latestIssue.displayRuleUsed)}</p>
               <p>
                 Missing row: {latestIssue.missing ? "yes, explicit gap row" : "no"}
@@ -1084,7 +1129,7 @@ export default function MarketDetailScaffold({ slug }) {
                   <th className="px-4 py-3 font-semibold">Phase</th>
                   <th className="px-4 py-3 font-semibold">Up</th>
                   <th className="px-4 py-3 font-semibold">Down</th>
-                  <th className="px-4 py-3 font-semibold">BTC</th>
+                  <th className="px-4 py-3 font-semibold">{assetLabel}</th>
                   <th className="px-4 py-3 font-semibold">Rule</th>
                   <th className="px-4 py-3 font-semibold">Quality</th>
                 </tr>
@@ -1108,7 +1153,7 @@ export default function MarketDetailScaffold({ slug }) {
                     <td className="px-4 py-3">
                       {formatProbability(snapshot.downDisplayed)}
                     </td>
-                    <td className="px-4 py-3">{formatBtcUsd(snapshot.btcChainlink)}</td>
+                    <td className="px-4 py-3">{formatUsd(snapshot[chainlinkKey])}</td>
                     <td className="px-4 py-3">
                       {formatSnapshotQualityLabel(snapshot.displayRuleUsed)}
                     </td>

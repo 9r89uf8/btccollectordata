@@ -62,7 +62,7 @@ export default function MarketsArchive() {
   const selectedFilter =
     ARCHIVE_FILTERS.find((option) => option.id === status) ?? ARCHIVE_FILTERS[0];
   const archive = usePaginatedQuery(
-    api.markets.listArchiveBtc5m,
+    api.markets.listArchiveCrypto5m,
     { status },
     { initialNumItems: 24 },
   );
@@ -76,7 +76,7 @@ export default function MarketsArchive() {
               Archive
             </p>
             <h2 className="text-3xl font-semibold tracking-[-0.04em] text-stone-950">
-              Browse saved BTC 5-minute markets
+              Browse saved BTC and ETH 5-minute markets
             </h2>
             <p className="max-w-3xl text-sm leading-7 text-stone-700">
               {selectedFilter.description}

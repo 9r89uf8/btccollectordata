@@ -3,8 +3,9 @@
 import Link from "next/link";
 
 import {
-  formatBtcReferenceValue,
-  formatBtcUsd,
+  formatReferenceValue,
+  getAssetLabel,
+  getChainlinkSnapshotKey,
   formatEtRange,
   formatProbability,
   getMarketState,
@@ -24,6 +25,9 @@ function Pill({ tone, children }) {
 
 export default function MarketCard({ market, snapshot = null }) {
   const state = getMarketState(market);
+  const assetLabel = getAssetLabel(market);
+  const chainlinkSnapshotKey = getChainlinkSnapshotKey(market);
+  const chainlinkPrice = snapshot?.[chainlinkSnapshotKey];
   const startReference =
     market.priceToBeatOfficial ?? market.priceToBeatDerived ?? null;
   const startReferenceValueLabel = market.active
@@ -55,6 +59,9 @@ export default function MarketCard({ market, snapshot = null }) {
           </h3>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Pill tone={market.asset === "eth" ? "emerald" : "sky"}>
+            {assetLabel}
+          </Pill>
           <Pill tone={state.tone}>{state.label}</Pill>
           <Pill tone="stone">{market.captureMode}</Pill>
         </div>
@@ -82,7 +89,7 @@ export default function MarketCard({ market, snapshot = null }) {
             Price to beat
           </p>
           <p className="mt-2 text-sm leading-6 text-stone-700">
-            {formatBtcReferenceValue(startReference, startReferenceValueLabel)}
+            {formatReferenceValue(startReference, startReferenceValueLabel)}
           </p>
           <p className="text-sm leading-6 text-stone-500">
             {startReferenceLabel}
@@ -105,10 +112,10 @@ export default function MarketCard({ market, snapshot = null }) {
           </div>
           <div className="rounded-[1rem] bg-stone-50 p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-              BTC and source
+              {assetLabel} and source
             </p>
             <p className="mt-2 text-sm leading-6 text-stone-700">
-              Chainlink BTC: {snapshot.btcChainlink?.toFixed(2) ?? "pending"}
+              Chainlink {assetLabel}: {chainlinkPrice?.toFixed(2) ?? "pending"}
             </p>
             <p className="text-sm leading-6 text-stone-700">
               Rule: {snapshot.displayRuleUsed}
