@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import {
   CRYPTO_PAIR_DEFAULT_ROW_LIMIT,
   CRYPTO_PAIR_LOOKBACK_MS,
+  CRYPTO_PAIR_WINDOW_MS,
   buildBtcEthOutcomeComparison,
 } from "../packages/shared/src/cryptoPairAnalytics.js";
 
@@ -54,7 +55,7 @@ export const getBtcEthOutcomeComparison = query({
   handler: async (ctx, args) => {
     const nowTs = Date.now();
     const lookbackMs = getLookbackMs(args.hours);
-    const fromTs = nowTs - lookbackMs;
+    const fromTs = nowTs - lookbackMs - CRYPTO_PAIR_WINDOW_MS;
     const scanLimit = getScanLimit(lookbackMs);
     const rows = await ctx.db
       .query("markets")

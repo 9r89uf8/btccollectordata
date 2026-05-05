@@ -7,6 +7,10 @@ import { api } from "@/convex/_generated/api";
 import { formatEtRange } from "@/components/marketFormat";
 
 const STATUS_META = {
+  missing_prior_btc: {
+    label: "Missing prior BTC",
+    className: "border-amber-200 bg-amber-50 text-amber-800",
+  },
   missing_btc: {
     label: "Missing BTC",
     className: "border-amber-200 bg-amber-50 text-amber-800",
@@ -144,6 +148,26 @@ function PairRow({ pair }) {
   );
 }
 
+function LagRow({ row }) {
+  return (
+    <article className="grid gap-4 rounded-[1rem] border border-black/10 bg-white p-4 shadow-[0_10px_28px_rgba(30,30,30,0.04)] md:grid-cols-[1.25fr_1fr_1fr_auto] md:items-center">
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+          ETH {row.timestampSlug}
+        </p>
+        <p className="mt-2 text-sm leading-6 text-stone-700">
+          {formatEtRange(row.ethWindowStartTs, row.ethWindowEndTs)}
+        </p>
+      </div>
+      <MarketCell label="Prior BTC" market={row.previousBtc} />
+      <MarketCell label="Current ETH" market={row.eth} />
+      <div className="md:justify-self-end">
+        <StatusBadge status={row.status} />
+      </div>
+    </article>
+  );
+}
+
 function LoadingState() {
   return (
     <div className="space-y-4">
@@ -170,7 +194,9 @@ export default function CryptoPairAnalytics() {
     return <LoadingState />;
   }
 
-  const { pairs, scannedMarkets, scanLimit, summary, toTs } = dashboard;
+  const { lag, pairs, scannedMarkets, scanLimit, summary, toTs } = dashboard;
+  const lagSummary = lag?.summary ?? {};
+  const lagRows = lag?.rows ?? [];
 
   return (
     <section className="space-y-5">
@@ -220,6 +246,54 @@ export default function CryptoPairAnalytics() {
           <p>Unresolved pairs: {formatNumber(summary.unresolvedPairs)}</p>
         </div>
       </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard
+          detail={`${formatNumber(lagSummary.totalEthWindows)} ETH windows`}
+          label="Prior BTC pairs"
+          value={formatNumber(lagSummary.resolvedPairs)}
+        />
+        <StatCard
+          detail={`${formatPercent(lagSummary.sameOutcomeRate)} of resolved lag pairs`}
+          label="Prior BTC same"
+          value={formatNumber(lagSummary.sameOutcome)}
+        />
+        <StatCard
+          detail={`${formatPercent(lagSummary.oppositeOutcomeRate)} of resolved lag pairs`}
+          label="Prior BTC opposite"
+          value={formatNumber(lagSummary.oppositeOutcome)}
+        />
+        <StatCard
+          detail={`${formatNumber(lagSummary.unresolvedPairs)} unresolved`}
+          label="Missing prior"
+          value={formatNumber(lagSummary.missingPriorBtc)}
+        />
+      </div>
+
+      <div className="rounded-[1.2rem] border border-black/10 bg-white/85 p-5 shadow-[0_12px_38px_rgba(30,30,30,0.05)]">
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-stone-500">
+          One-window lag
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
+          Previous BTC settlement versus current ETH settlement
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-700">
+          Each ETH market is matched against the BTC market from the immediately
+          preceding 5-minute timestamp.
+        </p>
+      </div>
+
+      {lagRows.length === 0 ? (
+        <div className="rounded-[1rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm text-stone-700">
+          No prior-BTC ETH lag pairs are available for the last 24 hours.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {lagRows.map((row) => (
+            <LagRow key={row.ethWindowStartTs} row={row} />
+          ))}
+        </div>
+      )}
 
       {pairs.length === 0 ? (
         <div className="rounded-[1rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm text-stone-700">

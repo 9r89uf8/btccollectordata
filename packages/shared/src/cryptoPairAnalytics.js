@@ -2,6 +2,7 @@ import { CRYPTO_ASSETS } from "./ingest.js";
 
 export const CRYPTO_PAIR_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 export const CRYPTO_PAIR_DEFAULT_ROW_LIMIT = 96;
+export const CRYPTO_PAIR_WINDOW_MS = 5 * 60 * 1000;
 
 function toFiniteNumber(value) {
   const number = Number(value);
@@ -52,6 +53,68 @@ function increment(counter, key) {
   counter[key] = (counter[key] ?? 0) + 1;
 }
 
+function buildLagComparisons({ pairsByWindowStart, rowLimit }) {
+  const rows = [...pairsByWindowStart.values()]
+    .filter((pair) => pair.eth && pair.inLookback)
+    .sort((a, b) => b.windowStartTs - a.windowStartTs)
+    .map((pair) => {
+      const previousBtcWindowStartTs = pair.windowStartTs - CRYPTO_PAIR_WINDOW_MS;
+      const previousBtc =
+        pairsByWindowStart.get(previousBtcWindowStartTs)?.btc ?? null;
+      const eth = pair.eth;
+      let status = "missing_prior_btc";
+
+      if (previousBtc && (!previousBtc.winningOutcome || !eth.winningOutcome)) {
+        status = "unresolved";
+      } else if (previousBtc?.winningOutcome === eth.winningOutcome) {
+        status = "same";
+      } else if (previousBtc) {
+        status = "opposite";
+      }
+
+      return {
+        eth,
+        ethWindowEndTs: pair.windowEndTs,
+        ethWindowStartTs: pair.windowStartTs,
+        previousBtc,
+        previousBtcWindowStartTs,
+        status,
+        timestampSlug: pair.timestampSlug,
+      };
+    });
+  const statusCounts = {
+    missing_prior_btc: 0,
+    opposite: 0,
+    same: 0,
+    unresolved: 0,
+  };
+  let resolvedPairs = 0;
+
+  for (const row of rows) {
+    if (row.status === "same" || row.status === "opposite") {
+      resolvedPairs += 1;
+    }
+
+    increment(statusCounts, row.status);
+  }
+
+  return {
+    rows: rows.slice(0, rowLimit),
+    statusCounts,
+    summary: {
+      missingPriorBtc: statusCounts.missing_prior_btc,
+      oppositeOutcome: statusCounts.opposite,
+      oppositeOutcomeRate:
+        resolvedPairs > 0 ? statusCounts.opposite / resolvedPairs : null,
+      resolvedPairs,
+      sameOutcome: statusCounts.same,
+      sameOutcomeRate: resolvedPairs > 0 ? statusCounts.same / resolvedPairs : null,
+      totalEthWindows: rows.length,
+      unresolvedPairs: statusCounts.unresolved,
+    },
+  };
+}
+
 export function buildBtcEthOutcomeComparison({
   lookbackMs = CRYPTO_PAIR_LOOKBACK_MS,
   markets = [],
@@ -61,6 +124,7 @@ export function buildBtcEthOutcomeComparison({
   const safeLookbackMs = Math.max(5 * 60 * 1000, Math.min(lookbackMs, 7 * 24 * 60 * 60 * 1000));
   const safeRowLimit = Math.max(1, Math.min(rowLimit, 300));
   const fromTs = nowTs - safeLookbackMs;
+  const marketFromTs = fromTs - CRYPTO_PAIR_WINDOW_MS;
   const pairsByWindowStart = new Map();
 
   for (const market of markets) {
@@ -70,7 +134,7 @@ export function buildBtcEthOutcomeComparison({
     if (
       windowStartTs === null ||
       windowEndTs === null ||
-      windowStartTs < fromTs ||
+      windowStartTs < marketFromTs ||
       windowStartTs > nowTs
     ) {
       continue;
@@ -88,6 +152,7 @@ export function buildBtcEthOutcomeComparison({
         eth: null,
         timestampSlug: String(Math.floor(windowStartTs / 1000)),
         windowEndTs,
+        inLookback: windowStartTs >= fromTs,
         windowStartTs,
       };
 
@@ -97,6 +162,7 @@ export function buildBtcEthOutcomeComparison({
   }
 
   const pairs = [...pairsByWindowStart.values()]
+    .filter((pair) => pair.inLookback)
     .sort((a, b) => b.windowStartTs - a.windowStartTs)
     .map((pair) => ({
       ...pair,
@@ -137,6 +203,10 @@ export function buildBtcEthOutcomeComparison({
 
   return {
     fromTs,
+    lag: buildLagComparisons({
+      pairsByWindowStart,
+      rowLimit: safeRowLimit,
+    }),
     latestWindowStartTs: pairs[0]?.windowStartTs ?? null,
     lookbackMs: safeLookbackMs,
     pairs: pairs.slice(0, safeRowLimit),
