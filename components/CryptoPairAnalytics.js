@@ -186,7 +186,10 @@ function FlipEvidence({ window }) {
 
 function EthFlipRow({ row }) {
   return (
-    <article className="grid gap-4 rounded-[1rem] border border-black/10 bg-white p-4 shadow-[0_10px_28px_rgba(30,30,30,0.04)] lg:grid-cols-[1.3fr_0.8fr_1.4fr_auto] lg:items-center">
+    <Link
+      href={`/markets/${row.slug}`}
+      className="group grid gap-4 rounded-[1rem] border border-black/10 bg-white p-4 shadow-[0_10px_28px_rgba(30,30,30,0.04)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(30,30,30,0.08)] lg:grid-cols-[1.3fr_0.8fr_1.4fr_auto] lg:items-center"
+    >
       <div className="min-w-0">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
           {row.slug}
@@ -211,7 +214,7 @@ function EthFlipRow({ row }) {
         <FlipBadge flipped={row.tenSecond?.flipped} label="10s" />
         <FlipBadge flipped={row.fiveSecond?.flipped} label="5s" />
       </div>
-    </article>
+    </Link>
   );
 }
 
