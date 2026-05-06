@@ -4,13 +4,9 @@ import Link from "next/link";
 import { useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
-import { formatEtRange } from "@/components/marketFormat";
+import { formatEtRange, formatUsd } from "@/components/marketFormat";
 
 const STATUS_META = {
-  missing_prior_btc: {
-    label: "Missing prior BTC",
-    className: "border-amber-200 bg-amber-50 text-amber-800",
-  },
   missing_btc: {
     label: "Missing BTC",
     className: "border-amber-200 bg-amber-50 text-amber-800",
@@ -148,23 +144,144 @@ function PairRow({ pair }) {
   );
 }
 
-function LagRow({ row }) {
+function FlipBadge({ flipped, label }) {
   return (
-    <article className="grid gap-4 rounded-[1rem] border border-black/10 bg-white p-4 shadow-[0_10px_28px_rgba(30,30,30,0.04)] md:grid-cols-[1.25fr_1fr_1fr_auto] md:items-center">
+    <span
+      className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
+        flipped
+          ? "border-rose-200 bg-rose-50 text-rose-800"
+          : "border-stone-200 bg-stone-50 text-stone-600"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function FlipEvidence({ window }) {
+  if (!window?.flipped) {
+    return <span className="text-stone-500">No flip evidence</span>;
+  }
+
+  const details = [];
+
+  if (window.probabilityFlip) {
+    details.push(
+      `${window.probabilityFlip.side} ${Math.round(
+        window.probabilityFlip.price * 100,
+      )}c ${window.probabilityFlip.priceSource} at T-${window.probabilityFlip.secondsBeforeClose}s`,
+    );
+  }
+
+  if (window.referenceFlip) {
+    details.push(
+      `${window.referenceFlip.side} reference ${formatUsd(
+        window.referenceFlip.ethChainlink,
+      )} vs ${formatUsd(window.referenceFlip.priceToBeat)} at T-${window.referenceFlip.secondsBeforeClose}s`,
+    );
+  }
+
+  return <span>{details.join(" / ")}</span>;
+}
+
+function EthFlipRow({ row }) {
+  return (
+    <article className="grid gap-4 rounded-[1rem] border border-black/10 bg-white p-4 shadow-[0_10px_28px_rgba(30,30,30,0.04)] lg:grid-cols-[1.3fr_0.8fr_1.4fr_auto] lg:items-center">
       <div className="min-w-0">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
-          ETH {row.timestampSlug}
+          {row.slug}
         </p>
         <p className="mt-2 text-sm leading-6 text-stone-700">
-          {formatEtRange(row.ethWindowStartTs, row.ethWindowEndTs)}
+          {formatEtRange(row.windowStartTs, row.windowEndTs)}
         </p>
       </div>
-      <MarketCell label="Prior BTC" market={row.previousBtc} />
-      <MarketCell label="Current ETH" market={row.eth} />
-      <div className="md:justify-self-end">
-        <StatusBadge status={row.status} />
+      <div className="flex flex-wrap items-center gap-2">
+        <OutcomeBadge outcome={row.winningOutcome} />
+        <span className="text-xs text-stone-500">{row.dataQuality}</span>
+      </div>
+      <div className="space-y-2 text-sm leading-6 text-stone-700">
+        <p>
+          10s: <FlipEvidence window={row.tenSecond} />
+        </p>
+        <p>
+          5s: <FlipEvidence window={row.fiveSecond} />
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 lg:justify-end">
+        <FlipBadge flipped={row.tenSecond?.flipped} label="10s" />
+        <FlipBadge flipped={row.fiveSecond?.flipped} label="5s" />
       </div>
     </article>
+  );
+}
+
+function EthFinalFlipSection({ flips }) {
+  if (!flips) {
+    return (
+      <div className="rounded-[1.2rem] border border-black/10 bg-white/85 p-5 text-sm text-stone-600 shadow-[0_12px_38px_rgba(30,30,30,0.05)]">
+        Loading ETH final-window flips...
+      </div>
+    );
+  }
+
+  const { rows, scannedSnapshots, summary } = flips;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard
+          detail={`${formatPercent(summary.flip10sRate)} of resolved ETH`}
+          label="ETH flip 10s"
+          value={formatNumber(summary.flip10s)}
+        />
+        <StatCard
+          detail={`${formatPercent(summary.flip5sRate)} of resolved ETH`}
+          label="ETH flip 5s"
+          value={formatNumber(summary.flip5s)}
+        />
+        <StatCard
+          detail={`${formatNumber(summary.marketsWithFinalSnapshots)} with final rows`}
+          label="Resolved ETH"
+          value={formatNumber(summary.resolvedEthMarkets)}
+        />
+        <StatCard
+          detail={`${formatNumber(scannedSnapshots)} final snapshots scanned`}
+          label="ETH markets"
+          value={formatNumber(summary.ethMarkets)}
+        />
+      </div>
+
+      <div className="rounded-[1.2rem] border border-black/10 bg-white/85 p-5 shadow-[0_12px_38px_rgba(30,30,30,0.05)]">
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-stone-500">
+          ETH final-window flips
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
+          Strong late ETH side that settled the other way
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-700">
+          Probability flip uses an opposite displayed side at 80c or higher,
+          falling back to ask only if displayed price is missing. Reference flip
+          uses ETH Chainlink versus the market price to beat.
+        </p>
+        <div className="mt-4 grid gap-3 text-sm text-stone-700 sm:grid-cols-3">
+          <p>10s probability flips: {formatNumber(summary.probabilityFlip10s)}</p>
+          <p>10s reference flips: {formatNumber(summary.referenceFlip10s)}</p>
+          <p>Unresolved ETH: {formatNumber(summary.unresolvedEthMarkets)}</p>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-[1rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm text-stone-700">
+          No ETH final-window flips were found for the last 24 hours.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((row) => (
+            <EthFlipRow key={row.slug} row={row} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -189,14 +306,16 @@ export default function CryptoPairAnalytics() {
     hours: 24,
     rowLimit: 96,
   });
+  const ethFinalFlips = useQuery(api.cryptoAnalytics.getEthFinalFlipAnalytics, {
+    hours: 24,
+    rowLimit: 50,
+  });
 
   if (!dashboard) {
     return <LoadingState />;
   }
 
-  const { lag, pairs, scannedMarkets, scanLimit, summary, toTs } = dashboard;
-  const lagSummary = lag?.summary ?? {};
-  const lagRows = lag?.rows ?? [];
+  const { pairs, scannedMarkets, scanLimit, summary, toTs } = dashboard;
 
   return (
     <section className="space-y-5">
@@ -247,53 +366,7 @@ export default function CryptoPairAnalytics() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard
-          detail={`${formatNumber(lagSummary.totalEthWindows)} ETH windows`}
-          label="Prior BTC pairs"
-          value={formatNumber(lagSummary.resolvedPairs)}
-        />
-        <StatCard
-          detail={`${formatPercent(lagSummary.sameOutcomeRate)} of resolved lag pairs`}
-          label="Prior BTC same"
-          value={formatNumber(lagSummary.sameOutcome)}
-        />
-        <StatCard
-          detail={`${formatPercent(lagSummary.oppositeOutcomeRate)} of resolved lag pairs`}
-          label="Prior BTC opposite"
-          value={formatNumber(lagSummary.oppositeOutcome)}
-        />
-        <StatCard
-          detail={`${formatNumber(lagSummary.unresolvedPairs)} unresolved`}
-          label="Missing prior"
-          value={formatNumber(lagSummary.missingPriorBtc)}
-        />
-      </div>
-
-      <div className="rounded-[1.2rem] border border-black/10 bg-white/85 p-5 shadow-[0_12px_38px_rgba(30,30,30,0.05)]">
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-stone-500">
-          One-window lag
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-stone-950">
-          Previous BTC settlement versus current ETH settlement
-        </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-stone-700">
-          Each ETH market is matched against the BTC market from the immediately
-          preceding 5-minute timestamp.
-        </p>
-      </div>
-
-      {lagRows.length === 0 ? (
-        <div className="rounded-[1rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm text-stone-700">
-          No prior-BTC ETH lag pairs are available for the last 24 hours.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {lagRows.map((row) => (
-            <LagRow key={row.ethWindowStartTs} row={row} />
-          ))}
-        </div>
-      )}
+      <EthFinalFlipSection flips={ethFinalFlips} />
 
       {pairs.length === 0 ? (
         <div className="rounded-[1rem] border border-dashed border-stone-300 bg-white/70 p-6 text-sm text-stone-700">
